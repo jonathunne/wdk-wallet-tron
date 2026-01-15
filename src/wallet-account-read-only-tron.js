@@ -74,6 +74,26 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
   }
 
   /**
+   * Verifies a message's signature.
+   *
+   * @param {string} message - The original message.
+   * @param {string} signature - The signature to verify (hex-encoded).
+   * @returns {Promise<boolean>} True if the signature is valid.
+   */
+  async verify (message, signature) {
+    const tronWeb = this._tronWeb || new TronWeb({ fullHost: 'https://api.trongrid.io' })
+
+    const recoveredAddress = await tronWeb.trx.verifyMessageV2(message, signature)
+
+    if (!recoveredAddress) {
+      return false
+    }
+
+    const accountAddress = await this.getAddress()
+    return recoveredAddress.toLowerCase() === accountAddress.toLowerCase()
+  }
+
+  /**
    * Returns the account's tronix balance.
    *
    * @returns {Promise<bigint>} The tronix balance (in suns).

@@ -136,31 +136,9 @@ export default class WalletAccountTron extends WalletAccountReadOnlyTron {
    * @returns {Promise<string>} The message's signature.
    */
   async sign (message) {
-    const messageBytes = Buffer.from(message, 'utf8')
-    const messageHash = keccak_256(messageBytes)
-    const signatureBytes = this._account.sign(messageHash)
+    const privateKey = Buffer.from(this._account.privateKey).toString('hex')
 
-    const signature = Buffer.from(signatureBytes).toString('hex')
-
-    return signature
-  }
-
-  /**
-   * Verifies a message's signature.
-   *
-   * @param {string} message - The original message.
-   * @param {string} signature - The signature to verify.
-   * @returns {Promise<boolean>} True if the signature is valid.
-   */
-  async verify (message, signature) {
-    const messageBytes = Buffer.from(message, 'utf8')
-    const signatureBytes = Buffer.from(signature, 'hex')
-
-    const messageHash = keccak_256(messageBytes)
-
-    const isValid = this._account.verify(messageHash, signatureBytes)
-
-    return isValid
+    return TronWeb.Trx.signMessageV2(message, privateKey)
   }
 
   /**

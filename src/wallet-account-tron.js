@@ -142,7 +142,7 @@ export default class WalletAccountTron extends WalletAccountReadOnlyTron {
     const hash = keccak_256(messageWithPrefixBytes)
 
     const signature = secp256k1.sign(hash, this._account.privateKey)
-    const signatureWithRecovery = new Uint8Array([ ...signature.toCompactRawBytes(), 27 + signature.recovery ])
+    const signatureWithRecovery = new Uint8Array([...signature.toCompactRawBytes(), 27 + signature.recovery])
     const hex = Buffer.from(signatureWithRecovery).toString('hex')
 
     return '0x' + hex

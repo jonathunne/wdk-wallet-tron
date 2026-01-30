@@ -6,10 +6,12 @@ const getChainParametersMock = jest.fn()
 
 jest.unstable_mockModule('tronweb', () => {
   const RealTronWeb = jest.requireActual('tronweb')
-  const MockTronWeb = jest.fn().mockReturnValue({
-    trx: {
-      getChainParameters: getChainParametersMock
-    }
+  const MockTronWeb = jest.fn().mockImplementation((options) => {
+    const provider = new RealTronWeb(options)
+
+    provider.trx.getChainParameters = getChainParametersMock
+
+    return provider
   })
   Object.assign(MockTronWeb, RealTronWeb)
   MockTronWeb.address = RealTronWeb.address

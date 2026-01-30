@@ -1,75 +1,91 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 
-import TronWeb from 'tronweb'
+const ADDRESS = 'TXngH8bVadn9ZWtKBgjKQcqN1GsZ7A1jcb'
 
-import { WalletAccountReadOnlyTron } from '../index.js'
+const getBalanceMock = jest.fn()
+const getAccountResourcesMock = jest.fn()
+const triggerConstantContractMock = jest.fn()
+const sendTrxMock = jest.fn()
+const getTransactionInfoMock = jest.fn()
+const getChainParametersMock = jest.fn()
 
-const ADDRESS = 'TLpETV5SGJVx6xLRRcDeMfQa3LeobqHu1x'
+jest.unstable_mockModule('tronweb', () => {
+  const RealTronWeb = jest.requireActual('tronweb')
+  const MockTronWeb = jest.fn().mockImplementation((options) => {
+    const provider = new RealTronWeb(options)
+
+    provider.getBalance = getBalanceMock
+
+    provider.trx.getBalance = getBalanceMock
+    provider.trx.getAccountResources = getAccountResourcesMock
+    provider.trx.getTransactionInfo = getTransactionInfoMock
+    provider.trx.getChainParameters = getChainParametersMock
+
+    provider.transactionBuilder.triggerConstantContract = triggerConstantContractMock
+    provider.transactionBuilder.sendTrx = sendTrxMock
+
+    return provider
+  })
+
+  // Copy static properties
+  Object.assign(MockTronWeb, RealTronWeb)
+  MockTronWeb.address = RealTronWeb.address
+
+  return {
+    default: MockTronWeb
+  }
+})
+
+const { default: TronWeb } = await import('tronweb')
+const { WalletAccountReadOnlyTron } = await import('../index.js')
 
 describe('WalletAccountReadOnlyTron', () => {
   let account
 
   beforeEach(() => {
-    account = new WalletAccountReadOnlyTron(ADDRESS)
+    jest.clearAllMocks()
+
+    account = new WalletAccountReadOnlyTron(ADDRESS, {
+      provider: 'https://tron.web.provider/'
+    })
   })
 
   describe('verify', () => {
     const MESSAGE = 'Dummy message to sign.'
+    const SIGNATURE = '0x67b1e4bb9a9b070cd60776ceab1ff4d7c4d4997bb5b4a71757da646f75d847e6600c22d8d83caa13d42c33099f75ba5ec30390467392aa78a3e5319da6c30e291b'
 
     test('should return true for a valid signature', async () => {
-      const SIGNATURE = '0xd130f94c52bf393206267278ac0b6009e14f11712578e5c1f7afe4a12685c5b96a77a0832692d96fc51f4bd403839572c55042ecbcc92d215879c5c8bb5778c51c'
-
-      const mockVerifyMessageV2 = jest.spyOn(TronWeb.Trx, 'verifyMessageV2')
-        .mockResolvedValue(ADDRESS)
-
       const result = await account.verify(MESSAGE, SIGNATURE)
 
-      expect(mockVerifyMessageV2).toHaveBeenCalledWith(MESSAGE, SIGNATURE)
       expect(result).toBe(true)
-
-      mockVerifyMessageV2.mockRestore()
     })
 
     test('should return false for an invalid signature', async () => {
-      const SIGNATURE = '0xd130f94c52bf393206267278ac0b6009e14f11712578e5c1f7afe4a12685c5b96a77a0832692d96fc51f4bd403839572c55042ecbcc92d215879c5c8bb5778c51c'
+      const result = await account.verify('Another message.', SIGNATURE)
 
-      const mockVerifyMessageV2 = jest.spyOn(TronWeb.Trx, 'verifyMessageV2')
-        .mockResolvedValue('TDifferentAddress123456789')
-
-      const result = await account.verify(MESSAGE, SIGNATURE)
-
-      expect(mockVerifyMessageV2).toHaveBeenCalledWith(MESSAGE, SIGNATURE)
       expect(result).toBe(false)
-
-      mockVerifyMessageV2.mockRestore()
     })
 
     test('should throw on a malformed signature', async () => {
       await expect(account.verify(MESSAGE, '0xinvalid'))
-        .rejects.toThrow()
+        .rejects.toThrow(/invalid BytesLike value/)
     })
   })
 
   describe('getBalance', () => {
     test('should return the correct balance of the account', async () => {
-      const EXPECTED_BALANCE = 1_000_000_000n
-
-      const mockTronWeb = {
-        trx: {
-          getBalance: jest.fn().mockResolvedValue(1_000_000_000)
-        }
-      }
-
-      account._tronWeb = mockTronWeb
+      const DUMMY_BALANCE = 1_000_000_000
+      getBalanceMock.mockResolvedValue(DUMMY_BALANCE)
 
       const balance = await account.getBalance()
 
-      expect(mockTronWeb.trx.getBalance).toHaveBeenCalledWith(ADDRESS)
-      expect(balance).toBe(EXPECTED_BALANCE)
+      expect(getBalanceMock).toHaveBeenCalledWith(ADDRESS)
+      expect(balance).toBe(1_000_000_000n)
     })
 
     test('should throw if the account is not connected to tron web', async () => {
-      await expect(account.getBalance())
+      const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
+      await expect(disconnectedAccount.getBalance())
         .rejects.toThrow('The wallet must be connected to tron web to retrieve balances.')
     })
   })
@@ -78,39 +94,28 @@ describe('WalletAccountReadOnlyTron', () => {
     const TOKEN_ADDRESS = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
 
     test('should return the correct token balance of the account', async () => {
-      const EXPECTED_BALANCE = 1_000_000n
-
-      const mockTronWeb = {
-        address: {
-          toHex: jest.fn((addr) => '41' + addr.slice(1))
-        },
-        transactionBuilder: {
-          triggerConstantContract: jest.fn().mockResolvedValue({
-            constant_result: ['00000000000000000000000000000000000000000000000000000000000f4240']
-          })
-        },
-        toBigNumber: jest.fn(() => '1000000')
+      const DUMMY_CONSTANT_RESULT = {
+        constant_result: ['00000000000000000000000000000000000000000000000000000000000f4240']
       }
 
-      account._tronWeb = mockTronWeb
+      triggerConstantContractMock.mockResolvedValue(DUMMY_CONSTANT_RESULT)
 
       const balance = await account.getTokenBalance(TOKEN_ADDRESS)
 
-      expect(mockTronWeb.transactionBuilder.triggerConstantContract).toHaveBeenCalledWith(
+      expect(triggerConstantContractMock).toHaveBeenCalledWith(
         TOKEN_ADDRESS,
         'balanceOf(address)',
         {},
-        expect.arrayContaining([
-          expect.objectContaining({ type: 'address' })
-        ]),
-        expect.any(String)
+        [{ type: 'address', value: TronWeb.address.toHex(ADDRESS) }],
+        TronWeb.address.toHex(ADDRESS)
       )
 
-      expect(balance).toBe(EXPECTED_BALANCE)
+      expect(balance).toBe(1_000_000n)
     })
 
     test('should throw if the account is not connected to tron web', async () => {
-      await expect(account.getTokenBalance(TOKEN_ADDRESS))
+      const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
+      await expect(disconnectedAccount.getTokenBalance(TOKEN_ADDRESS))
         .rejects.toThrow('The wallet must be connected to tron web to retrieve token balances.')
     })
   })
@@ -121,41 +126,36 @@ describe('WalletAccountReadOnlyTron', () => {
         to: 'TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD',
         value: 1_000_000
       }
-
       const EXPECTED_FEE = 202_000n
 
-      const mockTronWeb = {
-        transactionBuilder: {
-          sendTrx: jest.fn().mockResolvedValue({
-            txID: 'mock-tx-id',
-            raw_data_hex: '0a' + '00'.repeat(100)
-          })
-        },
-        trx: {
-          getAccountResources: jest.fn().mockResolvedValue({
-            freeNetLimit: 5000,
-            freeNetUsed: 4900,
-            NetLimit: 0,
-            NetUsed: 0
-          })
-        }
-      }
+      sendTrxMock.mockResolvedValue({
+        txID: 'mock-tx-id',
+        raw_data_hex: '0a' + '00'.repeat(100)
+      })
 
-      account._tronWeb = mockTronWeb
+      getAccountResourcesMock.mockResolvedValue({
+        freeNetLimit: 5000,
+        freeNetUsed: 4900,
+        NetLimit: 0,
+        NetUsed: 0
+      })
 
       const { fee } = await account.quoteSendTransaction(TRANSACTION)
 
-      expect(mockTronWeb.transactionBuilder.sendTrx).toHaveBeenCalledWith(
+      expect(sendTrxMock).toHaveBeenCalledWith(
         TRANSACTION.to,
         TRANSACTION.value,
         ADDRESS
       )
 
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ADDRESS)
+
       expect(fee).toBe(EXPECTED_FEE)
     })
 
     test('should throw if the account is not connected to tron web', async () => {
-      await expect(account.quoteSendTransaction({ to: ADDRESS, value: 1000 }))
+      const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
+      await expect(disconnectedAccount.quoteSendTransaction({ to: ADDRESS, value: 1000 }))
         .rejects.toThrow('The wallet must be connected to tron web to quote transactions.')
     })
   })
@@ -168,40 +168,30 @@ describe('WalletAccountReadOnlyTron', () => {
         amount: 100_000_000
       }
 
-      const mockTronWeb = {
-        address: {
-          toHex: jest.fn((addr) => '41' + addr.slice(1))
-        },
-        transactionBuilder: {
-          triggerConstantContract: jest.fn().mockResolvedValue({
-            constant_result: ['0000000000000000000000000000000000000000000000000000000000000064'],
-            energy_used: 10000,
-            transaction: {
-              raw_data_hex: '0a' + '00'.repeat(200)
-            }
-          })
-        },
-        trx: {
-          getAccountResources: jest.fn().mockResolvedValue({
-            freeNetLimit: 5000,
-            freeNetUsed: 0,
-            NetLimit: 0,
-            NetUsed: 0,
-            EnergyLimit: 100000,
-            EnergyUsed: 0
-          }),
-          getChainParameters: jest.fn().mockResolvedValue([
-            { key: 'getEnergyFee', value: 420 }
-          ])
-        },
-        toBigNumber: jest.fn((val) => val)
-      }
+      triggerConstantContractMock.mockResolvedValue({
+        constant_result: ['0000000000000000000000000000000000000000000000000000000000000064'],
+        energy_used: 10000,
+        transaction: {
+          raw_data_hex: '0a' + '00'.repeat(200)
+        }
+      })
 
-      account._tronWeb = mockTronWeb
+      getAccountResourcesMock.mockResolvedValue({
+        freeNetLimit: 5000,
+        freeNetUsed: 0,
+        NetLimit: 0,
+        NetUsed: 0,
+        EnergyLimit: 100000,
+        EnergyUsed: 0
+      })
+
+      getChainParametersMock.mockResolvedValue([
+        { key: 'getEnergyFee', value: 420 }
+      ])
 
       const { fee } = await account.quoteTransfer(TRANSFER)
 
-      expect(mockTronWeb.transactionBuilder.triggerConstantContract).toHaveBeenCalledWith(
+      expect(triggerConstantContractMock).toHaveBeenCalledWith(
         TRANSFER.token,
         'transfer(address,uint256)',
         {},
@@ -209,14 +199,17 @@ describe('WalletAccountReadOnlyTron', () => {
           expect.objectContaining({ type: 'address' }),
           expect.objectContaining({ type: 'uint256', value: TRANSFER.amount })
         ]),
-        expect.any(String)
+        TronWeb.address.toHex(ADDRESS)
       )
+
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ADDRESS)
 
       expect(typeof fee).toBe('bigint')
     })
 
     test('should throw if the account is not connected to tron web', async () => {
-      await expect(account.quoteTransfer({
+      const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
+      await expect(disconnectedAccount.quoteTransfer({
         token: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
         recipient: ADDRESS,
         amount: 100
@@ -236,37 +229,26 @@ describe('WalletAccountReadOnlyTron', () => {
         result: 'SUCCESS'
       }
 
-      const mockTronWeb = {
-        trx: {
-          getTransactionInfo: jest.fn().mockResolvedValue(DUMMY_RECEIPT)
-        }
-      }
-
-      account._tronWeb = mockTronWeb
+      getTransactionInfoMock.mockResolvedValue(DUMMY_RECEIPT)
 
       const receipt = await account.getTransactionReceipt(TRANSACTION_HASH)
 
-      expect(mockTronWeb.trx.getTransactionInfo).toHaveBeenCalledWith(TRANSACTION_HASH)
+      expect(getTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
       expect(receipt).toEqual(DUMMY_RECEIPT)
     })
 
     test('should return null if the transaction has not been included in a block yet', async () => {
-      const mockTronWeb = {
-        trx: {
-          getTransactionInfo: jest.fn().mockResolvedValue({})
-        }
-      }
-
-      account._tronWeb = mockTronWeb
+      getTransactionInfoMock.mockResolvedValue({})
 
       const receipt = await account.getTransactionReceipt(TRANSACTION_HASH)
 
-      expect(mockTronWeb.trx.getTransactionInfo).toHaveBeenCalledWith(TRANSACTION_HASH)
+      expect(getTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
       expect(receipt).toBe(null)
     })
 
     test('should throw if the account is not connected to tron web', async () => {
-      await expect(account.getTransactionReceipt(TRANSACTION_HASH))
+      const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
+      await expect(disconnectedAccount.getTransactionReceipt(TRANSACTION_HASH))
         .rejects.toThrow('The wallet must be connected to tron web to fetch transaction receipts.')
     })
   })

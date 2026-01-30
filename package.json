@@ -20,7 +20,7 @@
   "scripts": {
     "build:types": "tsc",
     "lint": "standard",
-    "lint:fix": "standard --fix --env jest",
+    "lint:fix": "standard --fix",
     "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
     "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage"
   },

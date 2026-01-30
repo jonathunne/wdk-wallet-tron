@@ -1,14 +1,30 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
 
-import WalletManagerTron, { WalletAccountTron } from '../index.js'
-
 const SEED_PHRASE = 'cook voyage document eight skate token alien guide drink uncle term abuse'
+
+const getChainParametersMock = jest.fn()
+
+jest.unstable_mockModule('tronweb', () => {
+  const RealTronWeb = jest.requireActual('tronweb')
+  const MockTronWeb = jest.fn().mockReturnValue({
+    trx: {
+      getChainParameters: getChainParametersMock
+    }
+  })
+  Object.assign(MockTronWeb, RealTronWeb)
+  MockTronWeb.address = RealTronWeb.address
+  return { default: MockTronWeb }
+})
+
+const { default: WalletManagerTron, WalletAccountTron } = await import('../index.js')
 
 describe('WalletManagerTron', () => {
   let wallet
 
   beforeEach(() => {
-    wallet = new WalletManagerTron(SEED_PHRASE)
+    wallet = new WalletManagerTron(SEED_PHRASE, {
+      provider: 'https://tron.web.provider/'
+    })
   })
 
   afterEach(() => {
@@ -61,29 +77,22 @@ describe('WalletManagerTron', () => {
 
   describe('getFeeRates', () => {
     test('should return the correct fee rates', async () => {
-      const DUMMY_FEE = 1000
+      const DUMMY_CHAIN_PARAMETERS = [
+        { key: 'getTransactionFee', value: 1_000 }
+      ]
 
-      const mockTronWeb = {
-        trx: {
-          getChainParameters: jest.fn().mockResolvedValue([
-            { key: 'getTransactionFee', value: DUMMY_FEE }
-          ])
-        }
-      }
-
-      wallet._tronWeb = mockTronWeb
+      getChainParametersMock.mockResolvedValue(DUMMY_CHAIN_PARAMETERS)
 
       const feeRates = await wallet.getFeeRates()
 
-      expect(mockTronWeb.trx.getChainParameters).toHaveBeenCalled()
-
-      expect(feeRates.normal).toBe(1100n)
-
-      expect(feeRates.fast).toBe(2000n)
+      expect(getChainParametersMock).toHaveBeenCalled()
+      expect(feeRates.normal).toBe(1_100n)
+      expect(feeRates.fast).toBe(2_000n)
     })
 
     test('should throw if the wallet is not connected to tron web', async () => {
-      await expect(wallet.getFeeRates())
+      const disconnectedWallet = new WalletManagerTron(SEED_PHRASE)
+      await expect(disconnectedWallet.getFeeRates())
         .rejects.toThrow('The wallet must be connected to tron web to get fee rates.')
     })
   })

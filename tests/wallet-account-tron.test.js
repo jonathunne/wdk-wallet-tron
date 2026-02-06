@@ -115,11 +115,13 @@ describe('WalletAccountTron', () => {
         value: 1_000_000
       }
       const DUMMY_TX_ID = 'abc123def456'
-
-      sendTrxMock.mockResolvedValue({
-        txID: 'dummy-tx-id',
+      const DUMMY_SEND_TRX_RESULT = {
+        txID: '00c3473fec7876829fb623fb4ecb26dcb6b7e88cb5832384619bd6e5649eb44f',
         raw_data_hex: '0a' + '00'.repeat(100)
-      })
+      }
+      const EXPECTED_SIGNATURE = 'e2fbd0590d2a6150952afdcdb8c0b137a8828fe45dacc6f17f552b10234baa9231811488104983c4d4333ad51c90343801aa72e41b1d576719cc798c4c98546100'
+
+      sendTrxMock.mockResolvedValue(DUMMY_SEND_TRX_RESULT)
 
       sendRawTransactionMock.mockResolvedValue({ txid: DUMMY_TX_ID })
 
@@ -136,7 +138,10 @@ describe('WalletAccountTron', () => {
       expect(fee).toBe(0n)
 
       expect(sendTrxMock).toHaveBeenCalledWith(TRANSACTION.to, TRANSACTION.value, ACCOUNT.address)
-      expect(sendRawTransactionMock).toHaveBeenCalled()
+      expect(sendRawTransactionMock).toHaveBeenCalledWith({
+        ...DUMMY_SEND_TRX_RESULT,
+        signature: [EXPECTED_SIGNATURE]
+      })
       expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
 
@@ -164,11 +169,14 @@ describe('WalletAccountTron', () => {
         }
       })
 
+      const DUMMY_TRIGGER_SMART_CONTRACT_RESULT = {
+        txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
+        raw_data_hex: '0a' + '00'.repeat(200)
+      }
+      const EXPECTED_SIGNATURE = 'b4273d17c4b46fb47d59b5aca2b4134cd83e02394a28bc4e86ffda7cbe1a21762b96e3af3d273d7e874153100fb2f1510f7e6579fa5ea9dde9107d4d15e1541100'
+
       triggerSmartContractMock.mockResolvedValue({
-        transaction: {
-          txID: 'dummy-tx-id',
-          raw_data_hex: '0a' + '00'.repeat(200)
-        }
+        transaction: DUMMY_TRIGGER_SMART_CONTRACT_RESULT
       })
 
       sendRawTransactionMock.mockResolvedValue({ txid: DUMMY_TX_ID })
@@ -205,6 +213,10 @@ describe('WalletAccountTron', () => {
         TronWeb.address.toHex(ACCOUNT.address)
       )
       
+      expect(sendRawTransactionMock).toHaveBeenCalledWith({
+        ...DUMMY_TRIGGER_SMART_CONTRACT_RESULT,
+        signature: [EXPECTED_SIGNATURE]
+      })
       expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
 

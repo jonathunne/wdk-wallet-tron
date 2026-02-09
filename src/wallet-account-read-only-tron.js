@@ -16,7 +16,10 @@
 
 import { WalletAccountReadOnly } from '@tetherto/wdk-wallet'
 
-import TronWeb from 'tronweb'
+import _TronWeb from 'tronweb'
+
+const { TronWeb } = _TronWeb
+
 
 /** @typedef {import('tronweb').Transaction} Transaction */
 /** @typedef {import('tronweb').TriggerSmartContract} TriggerSmartContract */
@@ -83,7 +86,7 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
   async verify (message, signature) {
     const address = await this.getAddress()
 
-    const recoveredAddress = await TronWeb.Trx.verifyMessageV2(message, signature)
+    const recoveredAddress = await this._tronWeb.trx.verifyMessageV2(message, signature)
 
     return address.toLowerCase() === recoveredAddress.toLowerCase()
   }

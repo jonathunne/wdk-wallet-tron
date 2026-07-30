@@ -755,6 +755,74 @@ describe('WalletAccountTron', () => {
     })
   })
 
+  describe('approve', () => {
+    const APPROVE = {
+      token: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+      spender: 'TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD',
+      amount: 100_000_000n
+    }
+
+    test('should successfully approve tokens to a spender', async () => {
+      const DUMMY_TX_ID = 'approvecall123'
+
+      triggerSmartContractMock.mockResolvedValue({
+        transaction: {
+          txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
+          raw_data: {
+            contract: [{
+              type: 'TriggerSmartContract',
+              parameter: {
+                value: {
+                  contract_address: TronWeb.address.toHex(APPROVE.token),
+                  owner_address: TronWeb.address.toHex(ACCOUNT.address),
+                  data: 'deadbeef',
+                  call_value: 0
+                }
+              }
+            }]
+          },
+          raw_data_hex: '0a' + '00'.repeat(200)
+        }
+      })
+
+      triggerConstantContractMock.mockResolvedValue({ energy_used: 10000 })
+      sendRawTransactionMock.mockResolvedValue({ txid: DUMMY_TX_ID })
+      getAccountResourcesMock.mockResolvedValue({
+        freeNetLimit: 5000,
+        freeNetUsed: 0,
+        NetLimit: 0,
+        NetUsed: 0,
+        EnergyLimit: 0,
+        EnergyUsed: 0
+      })
+      getChainParametersMock.mockResolvedValue([{ key: 'getEnergyFee', value: 420 }])
+
+      const { hash } = await account.approve(APPROVE)
+
+      expect(hash).toBe(DUMMY_TX_ID)
+
+      expect(triggerSmartContractMock).toHaveBeenCalledWith(
+        APPROVE.token,
+        'approve(address,uint256)',
+        { feeLimit: 15_000_000 },
+        [
+          { type: 'address', value: TronWeb.address.toHex(APPROVE.spender) },
+          { type: 'uint256', value: '100000000' }
+        ],
+        TronWeb.address.toHex(ACCOUNT.address)
+      )
+      expect(sendRawTransactionMock).toHaveBeenCalledWith(
+        expect.objectContaining({ signature: expect.any(Array) })
+      )
+    })
+
+    test('should throw if the account is not connected to tron web', async () => {
+      const disconnected = new WalletAccountTron(SEED_PHRASE, "0'/0/0")
+      await expect(disconnected.approve(APPROVE))
+        .rejects.toThrow('The wallet must be connected to tron web to approve funds.')
+    })
+  })
+
   describe('toReadOnlyAccount', () => {
     test('should return a read-only copy of the account', async () => {
       const readOnlyAccount = await account.toReadOnlyAccount()

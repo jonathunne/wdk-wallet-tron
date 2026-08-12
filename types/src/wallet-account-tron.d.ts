@@ -76,15 +76,10 @@ export default class WalletAccountTron extends WalletAccountReadOnlyTron impleme
      * @throws {Error} If the transaction's cost exceeds the maximum transaction fee option.
      */
     sendTransaction(tx: TronTransaction | TronSignedTransaction): Promise<TransactionResult & TronActivationFee>;
-    /**
-     * Asserts that a built transaction is owned by this wallet account, to avoid
-     * signing a transaction that operates on a different account.
-     *
-     * @private
-     * @param {Transaction} transaction - The unsigned tron web transaction.
-     * @throws {Error} If the transaction's owner address does not match the account.
-     */
+    /** @private */
     private _assertTransactionOwner;
+    /** @private */
+    private _isConsistentTransaction;
     /**
      * Transfers a TRC-20 token to another address.
      * TRC-20 transfers do not incur an account activation fee.

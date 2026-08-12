@@ -134,6 +134,29 @@ describe('WalletAccountTron', () => {
     raw_data_hex: '0a' + '00'.repeat(100)
   })
 
+  const CONSISTENT_PREBUILT_TX = {
+    txID: 'cbc59768e37a8d186165d94cb56579b8c76ec9b78239709c357e5d8ccaa59b38',
+    raw_data: {
+      contract: [{
+        type: 'TransferContract',
+        parameter: {
+          value: {
+            amount: 1_000_000,
+            owner_address: '41ef54f621d390f3491946659c31ddb8ef6785dd47',
+            to_address: '410834be38ba8d40629cc83de608d0bde149682385'
+          },
+          type_url: 'type.googleapis.com/protocol.TransferContract'
+        }
+      }],
+      ref_block_bytes: '1234',
+      ref_block_hash: '0011223344556677',
+      expiration: 1700000000000,
+      timestamp: 1699999000000
+    },
+    raw_data_hex: '0A021234220800112233445566774080D095FFBC315A67080112630A2D747970652E676F6F676C65617069732E636F6D2F70726F746F636F6C2E5472616E73666572436F6E747261637412320A1541EF54F621D390F3491946659C31DDB8EF6785DD471215410834BE38BA8D40629CC83DE608D0BDE14968238518C0843D70C0CBD8FEBC31'
+  }
+  const CONSISTENT_PREBUILT_SIGNATURE = '90772e79b238b0ce83446675f091e48a5ee7d3e76afcd830d21e91247aa9f7800d91038aaada318c28c6f01a2563a4a29b970bc651c9bdff5e7f70daf9a4f7e101'
+
   describe('signTransaction', () => {
     test('should throw if transaction fee exceeds the transaction max fee configuration', async () => {
       const TRANSACTION = {
@@ -243,6 +266,42 @@ describe('WalletAccountTron', () => {
         signature: [EXPECTED_SIGNATURE]
       })
     })
+
+    test('should sign a consistent prebuilt transaction owned by the account', async () => {
+      const signedTx = await account.signTransaction(CONSISTENT_PREBUILT_TX)
+
+      expect(signedTx).toEqual({
+        ...CONSISTENT_PREBUILT_TX,
+        signature: [CONSISTENT_PREBUILT_SIGNATURE]
+      })
+    })
+
+    test('should throw if a prebuilt txID does not match its raw data', async () => {
+      const tamperedTx = {
+        ...CONSISTENT_PREBUILT_TX,
+        txID: 'deadbeef'.repeat(8)
+      }
+
+      await expect(account.signTransaction(tamperedTx))
+        .rejects.toThrow('The transaction id does not match its raw data.')
+    })
+
+    test('should throw if a prebuilt transaction omits raw data', async () => {
+      const txIdOnly = { txID: 'deadbeef'.repeat(8) }
+
+      await expect(account.signTransaction(txIdOnly))
+        .rejects.toThrow('The transaction id does not match its raw data.')
+    })
+
+    test('should throw for a prebuilt transaction that omits txID', async () => {
+      const withoutTxID = {
+        raw_data: CONSISTENT_PREBUILT_TX.raw_data,
+        raw_data_hex: CONSISTENT_PREBUILT_TX.raw_data_hex
+      }
+
+      await expect(account.signTransaction(withoutTxID))
+        .rejects.toThrow('Invalid transaction.')
+    })
   })
 
   describe('quoteSendTransaction', () => {
@@ -270,6 +329,18 @@ describe('WalletAccountTron', () => {
   })
 
   describe('sendTransaction', () => {
+    test('should throw if a prebuilt txID does not match its raw data', async () => {
+      const tamperedTx = {
+        ...CONSISTENT_PREBUILT_TX,
+        txID: 'deadbeef'.repeat(8)
+      }
+
+      await expect(account.sendTransaction(tamperedTx))
+        .rejects.toThrow('The transaction id does not match its raw data.')
+
+      expect(sendRawTransactionMock).not.toHaveBeenCalled()
+    })
+
     test('should successfully send a tronix transfer', async () => {
       const TRANSACTION = { to: RECIPIENT, value: 1_000_000 }
       const DUMMY_TX_ID = 'abc123def456'
@@ -365,16 +436,23 @@ describe('WalletAccountTron', () => {
 
     test('should successfully send a pre-built transaction', async () => {
       const PREBUILT = {
-        txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
+        txID: 'fa99c9a1f545f95246b98dba67211a62726f1204e60541ed7d00bae880b47e11',
         raw_data: {
           contract: [{
             type: 'FreezeBalanceV2Contract',
-            parameter: { value: { owner_address: TronWeb.address.toHex(ACCOUNT.address), frozen_balance: 10_000_000, resource: 'ENERGY' } }
-          }]
+            parameter: {
+              value: { owner_address: TronWeb.address.toHex(ACCOUNT.address), frozen_balance: 10_000_000, resource: 'ENERGY' },
+              type_url: 'type.googleapis.com/protocol.FreezeBalanceV2Contract'
+            }
+          }],
+          ref_block_bytes: '1234',
+          ref_block_hash: '0011223344556677',
+          expiration: 1700000000000,
+          timestamp: 1699999000000
         },
-        raw_data_hex: '0a' + '00'.repeat(100)
+        raw_data_hex: '0A021234220800112233445566774080D095FFBC315A5A083612560A34747970652E676F6F676C65617069732E636F6D2F70726F746F636F6C2E467265657A6542616C616E63655632436F6E7472616374121E0A1541EF54F621D390F3491946659C31DDB8EF6785DD471080ADE204180170C0CBD8FEBC31'
       }
-      const EXPECTED_FEE = 245_000n
+      const EXPECTED_FEE = 264_000n
 
       sendRawTransactionMock.mockResolvedValue({ txid: 'freeze123' })
       getAccountResourcesMock.mockResolvedValue({ freeNetLimit: 0, freeNetUsed: 0, NetLimit: 0, NetUsed: 0 })
@@ -392,14 +470,21 @@ describe('WalletAccountTron', () => {
 
     test('should throw if the transaction owner does not match the account', async () => {
       const PREBUILT = {
-        txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
+        txID: 'c12e3bb6f52ad6310564fa394cfef8d9818b56b9d3db68f0a7125f8c8fcf83b0',
         raw_data: {
           contract: [{
             type: 'FreezeBalanceV2Contract',
-            parameter: { value: { owner_address: TronWeb.address.toHex(RECIPIENT), frozen_balance: 10_000_000, resource: 'ENERGY' } }
-          }]
+            parameter: {
+              value: { owner_address: TronWeb.address.toHex(RECIPIENT), frozen_balance: 10_000_000, resource: 'ENERGY' },
+              type_url: 'type.googleapis.com/protocol.FreezeBalanceV2Contract'
+            }
+          }],
+          ref_block_bytes: '1234',
+          ref_block_hash: '0011223344556677',
+          expiration: 1700000000000,
+          timestamp: 1699999000000
         },
-        raw_data_hex: '0a' + '00'.repeat(100)
+        raw_data_hex: '0A021234220800112233445566774080D095FFBC315A5A083612560A34747970652E676F6F676C65617069732E636F6D2F70726F746F636F6C2E467265657A6542616C616E63655632436F6E7472616374121E0A15410834BE38BA8D40629CC83DE608D0BDE1496823851080ADE204180170C0CBD8FEBC31'
       }
 
       await expect(account.sendTransaction(PREBUILT))

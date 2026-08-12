@@ -71,6 +71,7 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
      * @protected
      * @param {TronTransaction} tx - The transaction.
      * @returns {Promise<Transaction>} The unsigned tron web transaction.
+     * @throws {Error} If the transaction is invalid.
      */
     protected _buildTransaction(tx: TronTransaction): Promise<Transaction>;
     /**

@@ -233,6 +233,7 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
    * @protected
    * @param {TronTransaction} tx - The transaction.
    * @returns {Promise<Transaction>} The unsigned tron web transaction.
+   * @throws {Error} If the transaction is invalid.
    */
   async _buildTransaction (tx) {
     if (WalletAccountReadOnlyTron._isPrebuiltTransaction(tx)) {
@@ -251,9 +252,14 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
     }
 
     const { to, value } = tx
-    const address = await this.getAddress()
 
-    return await this._tronWeb.transactionBuilder.sendTrx(to, value, address)
+    if (to && value) {
+      const address = await this.getAddress()
+
+      return await this._tronWeb.transactionBuilder.sendTrx(to, value, address)
+    }
+
+    throw new Error('Invalid transaction.')
   }
 
   /**

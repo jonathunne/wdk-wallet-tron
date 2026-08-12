@@ -169,9 +169,11 @@ export default class WalletAccountTron extends WalletAccountReadOnlyTron {
       throw new Error('The wallet must be connected to tron web to sign transactions.')
     }
 
+    const isPrebuilt = WalletAccountReadOnlyTron._isPrebuiltTransaction(tx)
+
     const transaction = await this._buildTransaction(tx)
 
-    await this._assertTransactionOwner(transaction)
+    await this._assertTransactionOwner(transaction, isPrebuilt)
 
     if (this._config.transactionMaxFee !== undefined) {
       const { fee } = await this._quoteTransaction(transaction)
@@ -208,9 +210,11 @@ export default class WalletAccountTron extends WalletAccountReadOnlyTron {
     let signedTransaction = tx
 
     if (!tx.signature) {
+      const isPrebuilt = WalletAccountReadOnlyTron._isPrebuiltTransaction(tx)
+
       const transaction = await this._buildTransaction(tx)
 
-      await this._assertTransactionOwner(transaction)
+      await this._assertTransactionOwner(transaction, isPrebuilt)
 
       signedTransaction = await this._signTransaction(transaction)
     }
@@ -230,11 +234,22 @@ export default class WalletAccountTron extends WalletAccountReadOnlyTron {
    * Asserts that a built transaction is owned by this wallet account, to avoid
    * signing a transaction that operates on a different account.
    *
+   * For caller-supplied prebuilt transactions, it also asserts that the signed
+   * `txID` is bound to `raw_data`, so the owner check (which inspects `raw_data`)
+   * cannot be satisfied by a benign payload while the signature authorizes a
+   * different transaction.
+   *
    * @private
    * @param {Transaction} transaction - The unsigned tron web transaction.
+   * @param {boolean} [isPrebuilt] - Whether the transaction was supplied prebuilt by the caller (untrusted).
+   * @throws {Error} If a prebuilt transaction's `txID` does not match its `raw_data`.
    * @throws {Error} If the transaction's owner address does not match the account.
    */
-  async _assertTransactionOwner (transaction) {
+  async _assertTransactionOwner (transaction, isPrebuilt = false) {
+    if (isPrebuilt && !this._isConsistentTransaction(transaction)) {
+      throw new Error('The transaction id does not match its raw data.')
+    }
+
     const address = await this.getAddress()
     const ownerHex = this._tronWeb.address.toHex(address).toLowerCase()
 
@@ -242,6 +257,23 @@ export default class WalletAccountTron extends WalletAccountReadOnlyTron {
 
     if (txOwner && txOwner.toLowerCase() !== ownerHex) {
       throw new Error('The transaction owner does not match the wallet account address.')
+    }
+  }
+
+  /**
+   * Returns whether a prebuilt transaction's `txID` and `raw_data_hex` are bound
+   * to its decoded `raw_data`. A malformed or missing `raw_data` is treated as
+   * inconsistent.
+   *
+   * @private
+   * @param {Transaction} transaction - The unsigned tron web transaction.
+   * @returns {boolean} True if `txID` and `raw_data_hex` are bound to `raw_data`.
+   */
+  _isConsistentTransaction (transaction) {
+    try {
+      return this._tronWeb.utils.transaction.txCheck(transaction)
+    } catch {
+      return false
     }
   }
 

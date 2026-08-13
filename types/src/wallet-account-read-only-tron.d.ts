@@ -153,10 +153,20 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
      * solidified (irreversible) it becomes `final`.
      *
      * @param {string} hash - The transaction's hash.
-     * @returns {Promise<TronTransactionInfo>} The normalized receipt.
+     * @returns {Promise<TransactionReceipt & TronTransactionDetails>} The normalized receipt.
+     * @throws {ValueError} If the hash is not a valid transaction id.
      * @throws {NoSuchElementError} If no transaction has been found for the given hash.
      */
-    getTransaction(hash: string): Promise<TronTransactionInfo>;
+    getTransaction(hash: string): Promise<TransactionReceipt & TronTransactionDetails>;
+    /**
+     * Blocks until a transaction reaches a terminal state (the requested finality target or `dropped`), or times out.
+     *
+     * @param {string} hash - The transaction's hash.
+     * @param {WaitForTransactionOptions} [options] - The wait options.
+     * @returns {Promise<TransactionReceipt & TronTransactionDetails>} The terminal receipt: the finality target reached (inspect `success` to tell success from revert), or `dropped`.
+     * @throws {TimeoutError} If the target is not reached before the timeout.
+     */
+    waitForTransaction(hash: string, options?: WaitForTransactionOptions): Promise<TransactionReceipt & TronTransactionDetails>;
     /**
      * Returns whether a committed transaction executed successfully.
      *
@@ -172,8 +182,12 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
      * @returns {Promise<number | null>} The solidified block number, or null.
      */
     protected _getSolidifiedBlockNumber(): Promise<number | null>;
-    /** @protected @type {number} */
-    protected static _DEFAULT_WAIT_TIMEOUT: number;
+    /**
+     * Overrides the base default to allow for slower tron inclusion and solidification.
+     *
+     * @type {number}
+     */
+    get defaultWaitTimeout(): number;
     /**
      * Returns the bandwidth cost of a tron web's transaction.
      *
@@ -194,8 +208,18 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
 export type Transaction = import("tronweb").Types.Transaction;
 export type TronTransactionReceipt = import("tronweb").Types.TransactionInfo;
 export type TransactionReceipt = import("@tetherto/wdk-wallet").TransactionReceipt;
-export type TronTransactionInfo = TransactionReceipt & {
+export type WaitForTransactionOptions = import("@tetherto/wdk-wallet").WaitForTransactionOptions;
+/**
+ * The tron-specific fields added to a normalized transaction receipt.
+ */
+export type TronTransactionDetails = {
+    /**
+     * - The confirmation depth (null when the solidified block can't be resolved).
+     */
     confirmations: number | null;
+    /**
+     * - The native tron receipt, or null while the transaction is pending or dropped.
+     */
     receipt: TronTransactionReceipt | null;
 };
 export type AccountResourceMessage = import("tronweb").Types.AccountResourceMessage;

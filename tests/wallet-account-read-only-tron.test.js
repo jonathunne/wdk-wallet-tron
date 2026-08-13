@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 
 import { TronWeb, Trx } from 'tronweb'
-import { NoSuchElementError } from '@tetherto/wdk-wallet'
+import { NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
 
 const ADDRESS = 'TXngH8bVadn9ZWtKBgjKQcqN1GsZ7A1jcb'
 
@@ -565,7 +565,12 @@ describe('WalletAccountReadOnlyTron', () => {
   })
 
   describe('getTransaction', () => {
-    const TRANSACTION_HASH = 'abc123def456'
+    const TRANSACTION_HASH = 'c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2'
+
+    test('should throw ValueError when the transaction id is malformed', async () => {
+      await expect(account.getTransaction('not-a-valid-txid')).rejects.toThrow(ValueError)
+      expect(getUnconfirmedTransactionInfoMock).not.toHaveBeenCalled()
+    })
 
     test('should throw NoSuchElementError when the transaction is not known', async () => {
       getUnconfirmedTransactionInfoMock.mockResolvedValue({})

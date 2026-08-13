@@ -14,7 +14,7 @@
 
 'use strict'
 
-import { WalletAccountReadOnly, NoSuchElementError } from '@tetherto/wdk-wallet'
+import { WalletAccountReadOnly, NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
 
 import FailoverProvider from '@tetherto/wdk-failover-provider'
 
@@ -30,14 +30,14 @@ import { TronWeb, Trx } from 'tronweb'
 /** @typedef {import('@tetherto/wdk-wallet').TransferOptions} TransferOptions */
 /** @typedef {import('@tetherto/wdk-wallet').TransferResult} TransferResult */
 /** @typedef {import('@tetherto/wdk-wallet').TransactionReceipt} TransactionReceipt */
+/** @typedef {import('@tetherto/wdk-wallet').WaitForTransactionOptions} WaitForTransactionOptions */
 
 /**
- * A normalized tron transaction receipt, extended with the confirmation depth and the native tron receipt.
+ * The tron-specific fields added to a normalized transaction receipt.
  *
- * @typedef {TransactionReceipt & {
- *   confirmations: number | null,
- *   receipt: TronTransactionReceipt | null
- * }} TronTransactionInfo
+ * @typedef {Object} TronTransactionDetails
+ * @property {number | null} confirmations - The confirmation depth (null when the solidified block can't be resolved).
+ * @property {TronTransactionReceipt | null} receipt - The native tron receipt, or null while the transaction is pending or dropped.
  */
 
 /**
@@ -456,12 +456,17 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
    * solidified (irreversible) it becomes `final`.
    *
    * @param {string} hash - The transaction's hash.
-   * @returns {Promise<TronTransactionInfo>} The normalized receipt.
+   * @returns {Promise<TransactionReceipt & TronTransactionDetails>} The normalized receipt.
+   * @throws {ValueError} If the hash is not a valid transaction id.
    * @throws {NoSuchElementError} If no transaction has been found for the given hash.
    */
   async getTransaction (hash) {
     if (!this._tronWeb) {
       throw new Error('The wallet must be connected to tron web to fetch transactions.')
+    }
+
+    if (typeof hash !== 'string' || !/^(0x)?[0-9a-fA-F]{64}$/.test(hash.trim())) {
+      throw new ValueError(`Invalid transaction id: '${hash}'.`)
     }
 
     const receipt = await this._tronWeb.trx.getUnconfirmedTransactionInfo(hash)
@@ -488,6 +493,18 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
       confirmations,
       receipt
     }
+  }
+
+  /**
+   * Blocks until a transaction reaches a terminal state (the requested finality target or `dropped`), or times out.
+   *
+   * @param {string} hash - The transaction's hash.
+   * @param {WaitForTransactionOptions} [options] - The wait options.
+   * @returns {Promise<TransactionReceipt & TronTransactionDetails>} The terminal receipt: the finality target reached (inspect `success` to tell success from revert), or `dropped`.
+   * @throws {TimeoutError} If the target is not reached before the timeout.
+   */
+  async waitForTransaction (hash, options = {}) {
+    return await super.waitForTransaction(hash, options)
   }
 
   /**
@@ -522,8 +539,14 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
     }
   }
 
-  /** @protected @type {number} */
-  static _DEFAULT_WAIT_TIMEOUT = 90000
+  /**
+   * Overrides the base default to allow for slower tron inclusion and solidification.
+   *
+   * @type {number}
+   */
+  get defaultWaitTimeout () {
+    return 90000
+  }
 
   /**
    * Returns the bandwidth cost of a tron web's transaction.

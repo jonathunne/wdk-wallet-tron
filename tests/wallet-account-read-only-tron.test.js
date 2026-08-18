@@ -580,6 +580,24 @@ describe('WalletAccountReadOnlyTron', () => {
       expect(getConfirmedCurrentBlockMock).not.toHaveBeenCalled()
     })
 
+    test('should report pending when the unconfirmed info has no block number', async () => {
+      getUnconfirmedTransactionInfoMock.mockResolvedValue({
+        id: TRANSACTION_HASH,
+        receipt: { result: 'SUCCESS' }
+      })
+
+      const info = await account.getTransaction(TRANSACTION_HASH)
+
+      expect(info).toMatchObject({
+        hash: TRANSACTION_HASH,
+        finality: 'pending',
+        confirmations: null,
+        receipt: null
+      })
+      expect(info.success).toBeUndefined()
+      expect(getConfirmedCurrentBlockMock).not.toHaveBeenCalled()
+    })
+
     test('should report confirmed while the block is not yet solidified', async () => {
       getUnconfirmedTransactionInfoMock.mockResolvedValue({
         id: TRANSACTION_HASH,

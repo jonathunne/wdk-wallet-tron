@@ -476,7 +476,7 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
     }
 
     const blockNumber = receipt.blockNumber ?? null
-    
+
     if (blockNumber === null) {
       return {
         hash,

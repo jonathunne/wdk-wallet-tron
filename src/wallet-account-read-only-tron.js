@@ -469,17 +469,19 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
       throw new ValueError(`Invalid transaction id: '${hash}'.`)
     }
 
-    const receipt = await this._tronWeb.trx.getUnconfirmedTransactionInfo(hash)
+    const txid = hash.trim()
+
+    const receipt = await this._tronWeb.trx.getUnconfirmedTransactionInfo(txid)
 
     if (!receipt || Object.keys(receipt).length === 0) {
-      throw new NoSuchElementError(`No transaction found for '${hash}'.`)
+      throw new NoSuchElementError(`No transaction found for '${txid}'.`)
     }
 
     const blockNumber = receipt.blockNumber ?? null
 
     if (blockNumber === null) {
       return {
-        hash,
+        hash: txid,
         finality: 'pending',
         confirmations: null,
         receipt: null
@@ -495,7 +497,7 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
     const isFinal = solidifiedBlock !== null && blockNumber <= solidifiedBlock
 
     return {
-      hash,
+      hash: txid,
       finality: isFinal ? 'final' : 'confirmed',
       success: this._isTransactionSuccessful(receipt),
       block: blockNumber,

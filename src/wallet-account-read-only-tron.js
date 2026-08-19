@@ -14,7 +14,7 @@
 
 'use strict'
 
-import { WalletAccountReadOnly } from '@tetherto/wdk-wallet'
+import { WalletAccountReadOnly, NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
 
 import FailoverProvider from '@tetherto/wdk-failover-provider'
 
@@ -29,6 +29,16 @@ import { TronWeb, Trx } from 'tronweb'
 /** @typedef {import('@tetherto/wdk-wallet').TransactionResult} TransactionResult */
 /** @typedef {import('@tetherto/wdk-wallet').TransferOptions} TransferOptions */
 /** @typedef {import('@tetherto/wdk-wallet').TransferResult} TransferResult */
+/** @typedef {import('@tetherto/wdk-wallet').TransactionReceipt} TransactionReceipt */
+/** @typedef {import('@tetherto/wdk-wallet').WaitForTransactionOptions} WaitForTransactionOptions */
+
+/**
+ * The tron-specific fields added to a normalized transaction receipt.
+ *
+ * @typedef {Object} TronTransactionDetails
+ * @property {number | null} confirmations - The confirmation depth (null when the solidified block can't be resolved).
+ * @property {TronTransactionReceipt | null} receipt - The native tron receipt, or null while the transaction is pending or dropped.
+ */
 
 /**
  * A native tronix (TRX) transfer.
@@ -427,6 +437,7 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
   /**
    * Returns a transaction's receipt.
    *
+   * @deprecated Use {@link getTransaction} instead, which returns a normalized, finality-based receipt. The raw tron receipt remains available on its `receipt` property.
    * @param {string} hash - The transaction's hash.
    * @returns {Promise<TronTransactionReceipt | null>} The receipt, or null if the transaction has not been included in a block yet.
    */
@@ -442,6 +453,117 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
     }
 
     return receipt
+  }
+
+  /**
+   * Returns a normalized, finality-based receipt for a transaction.
+   *
+   * A transaction included in a block is `confirmed`; once its block has been
+   * solidified (irreversible) it becomes `final`.
+   *
+   * @param {string} hash - The transaction's hash.
+   * @returns {Promise<TransactionReceipt & TronTransactionDetails>} The normalized receipt.
+   * @throws {ValueError} If the hash is not a valid transaction id.
+   * @throws {NoSuchElementError} If no transaction has been found for the given hash.
+   */
+  async getTransaction (hash) {
+    if (!this._tronWeb) {
+      throw new Error('The wallet must be connected to tron web to fetch transactions.')
+    }
+
+    if (typeof hash !== 'string' || !/^(0x)?[0-9a-fA-F]{64}$/.test(hash.trim())) {
+      throw new ValueError(`Invalid transaction id: '${hash}'.`)
+    }
+
+    const txid = hash.trim()
+
+    const receipt = await this._tronWeb.trx.getUnconfirmedTransactionInfo(txid)
+
+    if (!receipt || Object.keys(receipt).length === 0) {
+      throw new NoSuchElementError(`No transaction found for '${txid}'.`)
+    }
+
+    const blockNumber = receipt.blockNumber ?? null
+
+    if (blockNumber === null) {
+      return {
+        hash: txid,
+        finality: 'pending',
+        confirmations: null,
+        receipt: null
+      }
+    }
+
+    const solidifiedBlock = await this._getSolidifiedBlockNumber()
+
+    const confirmations = solidifiedBlock !== null
+      ? Math.max(0, solidifiedBlock - blockNumber + 1)
+      : null
+
+    const isFinal = solidifiedBlock !== null && blockNumber <= solidifiedBlock
+
+    return {
+      hash: txid,
+      finality: isFinal ? 'final' : 'confirmed',
+      success: this._isTransactionSuccessful(receipt),
+      block: blockNumber,
+      fee: receipt.fee != null ? BigInt(receipt.fee) : undefined,
+      confirmations,
+      receipt
+    }
+  }
+
+  /**
+   * Blocks until a transaction reaches a terminal state (the requested finality target or `dropped`), or times out.
+   *
+   * @param {string} hash - The transaction's hash.
+   * @param {WaitForTransactionOptions} [options] - The wait options.
+   * @returns {Promise<TransactionReceipt & TronTransactionDetails>} The terminal receipt: the finality target reached (inspect `success` to tell success from revert), or `dropped`.
+   * @throws {TimeoutError} If the target is not reached before the timeout.
+   */
+  async waitForTransaction (hash, options = {}) {
+    return await super.waitForTransaction(hash, options)
+  }
+
+  /**
+   * Returns whether a committed transaction executed successfully.
+   *
+   * @protected
+   * @param {TronTransactionReceipt} receipt - The native tron receipt.
+   * @returns {boolean} The execution result.
+   */
+  _isTransactionSuccessful (receipt) {
+    if (receipt.result === 'FAILED') {
+      return false
+    }
+
+    const contractResult = receipt.receipt?.result
+
+    return contractResult == null || contractResult === 'SUCCESS'
+  }
+
+  /**
+   * Returns the number of the latest solidified (irreversible) block, or null when it can't be resolved.
+   *
+   * @protected
+   * @returns {Promise<number | null>} The solidified block number, or null.
+   */
+  async _getSolidifiedBlockNumber () {
+    try {
+      const block = await this._tronWeb.trx.getConfirmedCurrentBlock()
+      return block?.block_header?.raw_data?.number ?? null
+    } catch (error) {
+      return null
+    }
+  }
+
+  /**
+   * Overrides the base default to allow for slower tron inclusion and solidification.
+   *
+   * @type {number}
+   */
+  get defaultWaitTimeout () {
+    return 90000
   }
 
   /**

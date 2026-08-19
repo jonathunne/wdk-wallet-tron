@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 
 import { TronWeb, Trx } from 'tronweb'
+import { NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
 
 const ADDRESS = 'TXngH8bVadn9ZWtKBgjKQcqN1GsZ7A1jcb'
 
@@ -8,6 +9,8 @@ const getBalanceMock = jest.fn()
 const getAccountMock = jest.fn()
 const getAccountResourcesMock = jest.fn()
 const getTransactionInfoMock = jest.fn()
+const getUnconfirmedTransactionInfoMock = jest.fn()
+const getConfirmedCurrentBlockMock = jest.fn()
 const getChainParametersMock = jest.fn()
 
 const triggerConstantContractMock = jest.fn()
@@ -24,6 +27,8 @@ jest.unstable_mockModule('tronweb', () => {
       getAccount: getAccountMock,
       getAccountResources: getAccountResourcesMock,
       getTransactionInfo: getTransactionInfoMock,
+      getUnconfirmedTransactionInfo: getUnconfirmedTransactionInfoMock,
+      getConfirmedCurrentBlock: getConfirmedCurrentBlockMock,
       getChainParameters: getChainParametersMock
     }
 
@@ -556,6 +561,136 @@ describe('WalletAccountReadOnlyTron', () => {
       const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
       await expect(disconnectedAccount.getTransactionReceipt(TRANSACTION_HASH))
         .rejects.toThrow('The wallet must be connected to tron web to fetch transaction receipts.')
+    })
+  })
+
+  describe('getTransaction', () => {
+    const TRANSACTION_HASH = 'c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2'
+
+    test('should throw ValueError when the transaction id is malformed', async () => {
+      await expect(account.getTransaction('not-a-valid-txid')).rejects.toThrow(ValueError)
+      expect(getUnconfirmedTransactionInfoMock).not.toHaveBeenCalled()
+    })
+
+    test('should throw NoSuchElementError when the transaction is not known', async () => {
+      getUnconfirmedTransactionInfoMock.mockResolvedValue({})
+
+      await expect(account.getTransaction(TRANSACTION_HASH)).rejects.toThrow(NoSuchElementError)
+      expect(getUnconfirmedTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
+      expect(getConfirmedCurrentBlockMock).not.toHaveBeenCalled()
+    })
+
+    test('should report pending when the unconfirmed info has no block number', async () => {
+      getUnconfirmedTransactionInfoMock.mockResolvedValue({
+        id: TRANSACTION_HASH,
+        receipt: { result: 'SUCCESS' }
+      })
+
+      const info = await account.getTransaction(TRANSACTION_HASH)
+
+      expect(info).toMatchObject({
+        hash: TRANSACTION_HASH,
+        finality: 'pending',
+        confirmations: null,
+        receipt: null
+      })
+      expect(info.success).toBeUndefined()
+      expect(getConfirmedCurrentBlockMock).not.toHaveBeenCalled()
+    })
+
+    test('should report confirmed while the block is not yet solidified', async () => {
+      getUnconfirmedTransactionInfoMock.mockResolvedValue({
+        id: TRANSACTION_HASH,
+        blockNumber: 12345,
+        fee: 1000,
+        receipt: { result: 'SUCCESS' }
+      })
+      getConfirmedCurrentBlockMock.mockResolvedValue({
+        block_header: { raw_data: { number: 12340 } }
+      })
+
+      const info = await account.getTransaction(TRANSACTION_HASH)
+
+      expect(info).toMatchObject({
+        hash: TRANSACTION_HASH,
+        finality: 'confirmed',
+        success: true,
+        block: 12345,
+        fee: 1000n,
+        confirmations: 0
+      })
+      expect(info.receipt).not.toBeNull()
+    })
+
+    test('should report final once the block is solidified', async () => {
+      getUnconfirmedTransactionInfoMock.mockResolvedValue({
+        id: TRANSACTION_HASH,
+        blockNumber: 12345,
+        fee: 1000,
+        receipt: { result: 'SUCCESS' }
+      })
+      getConfirmedCurrentBlockMock.mockResolvedValue({
+        block_header: { raw_data: { number: 12350 } }
+      })
+
+      const info = await account.getTransaction(TRANSACTION_HASH)
+
+      expect(info.finality).toBe('final')
+      expect(info.confirmations).toBe(6)
+    })
+
+    test('should report success for a plain trx transfer without a receipt result', async () => {
+      getUnconfirmedTransactionInfoMock.mockResolvedValue({
+        id: TRANSACTION_HASH,
+        blockNumber: 12345,
+        fee: 1000
+      })
+      getConfirmedCurrentBlockMock.mockResolvedValue({
+        block_header: { raw_data: { number: 12350 } }
+      })
+
+      const info = await account.getTransaction(TRANSACTION_HASH)
+
+      expect(info.success).toBe(true)
+    })
+
+    test('should report failure for a reverted contract call', async () => {
+      getUnconfirmedTransactionInfoMock.mockResolvedValue({
+        id: TRANSACTION_HASH,
+        blockNumber: 12345,
+        fee: 1000,
+        result: 'FAILED',
+        receipt: { result: 'REVERT' }
+      })
+      getConfirmedCurrentBlockMock.mockResolvedValue({
+        block_header: { raw_data: { number: 12350 } }
+      })
+
+      const info = await account.getTransaction(TRANSACTION_HASH)
+
+      expect(info.finality).toBe('final')
+      expect(info.success).toBe(false)
+    })
+
+    test('should fall back to null confirmations when the solidified block is unavailable', async () => {
+      getUnconfirmedTransactionInfoMock.mockResolvedValue({
+        id: TRANSACTION_HASH,
+        blockNumber: 12345,
+        fee: 1000,
+        receipt: { result: 'SUCCESS' }
+      })
+      getConfirmedCurrentBlockMock.mockRejectedValue(new Error('unreachable'))
+
+      const info = await account.getTransaction(TRANSACTION_HASH)
+
+      expect(info.finality).toBe('confirmed')
+      expect(info.confirmations).toBeNull()
+    })
+
+    test('should throw if the account is not connected to tron web', async () => {
+      const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
+      await expect(disconnectedAccount.getTransaction(TRANSACTION_HASH))
+        .rejects.toThrow('The wallet must be connected to tron web to fetch transactions.')
     })
   })
 })

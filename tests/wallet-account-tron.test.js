@@ -762,29 +762,31 @@ describe('WalletAccountTron', () => {
       amount: 100_000_000n
     }
 
-    test('should successfully approve tokens to a spender', async () => {
-      const DUMMY_TX_ID = 'approvecall123'
+    const DUMMY_TX_ID = 'approvecall123'
 
-      triggerSmartContractMock.mockResolvedValue({
-        transaction: {
-          txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
-          raw_data: {
-            contract: [{
-              type: 'TriggerSmartContract',
-              parameter: {
-                value: {
-                  contract_address: TronWeb.address.toHex(APPROVE.token),
-                  owner_address: TronWeb.address.toHex(ACCOUNT.address),
-                  data: 'deadbeef',
-                  call_value: 0
-                }
-              }
-            }]
-          },
-          raw_data_hex: '0a' + '00'.repeat(200)
-        }
-      })
+    const TRANSACTION = {
+      txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
+      raw_data: {
+        contract: [{
+          type: 'TriggerSmartContract',
+          parameter: {
+            value: {
+              contract_address: TronWeb.address.toHex(APPROVE.token),
+              owner_address: TronWeb.address.toHex(ACCOUNT.address),
+              data: 'deadbeef',
+              call_value: 0
+            }
+          }
+        }]
+      },
+      raw_data_hex: '0a' + '00'.repeat(200)
+    }
 
+    // The signature of TRANSACTION.txID by the test account's private key.
+    const SIGNATURE = 'b4273d17c4b46fb47d59b5aca2b4134cd83e02394a28bc4e86ffda7cbe1a21762b96e3af3d273d7e874153100fb2f1510f7e6579fa5ea9dde9107d4d15e1541100'
+
+    beforeEach(() => {
+      triggerSmartContractMock.mockResolvedValue({ transaction: TRANSACTION })
       triggerConstantContractMock.mockResolvedValue({ energy_used: 10000 })
       sendRawTransactionMock.mockResolvedValue({ txid: DUMMY_TX_ID })
       getAccountResourcesMock.mockResolvedValue({
@@ -796,10 +798,15 @@ describe('WalletAccountTron', () => {
         EnergyUsed: 0
       })
       getChainParametersMock.mockResolvedValue([{ key: 'getEnergyFee', value: 420 }])
+    })
 
-      const { hash } = await account.approve(APPROVE)
+    test('should successfully approve tokens to a spender', async () => {
+      const { hash, fee, activationFee } = await account.approve(APPROVE)
 
       expect(hash).toBe(DUMMY_TX_ID)
+      // 10,000 energy at 420 SUN each; bandwidth is covered by the free allowance.
+      expect(fee).toBe(4_200_000n)
+      expect(activationFee).toBe(0n)
 
       expect(triggerSmartContractMock).toHaveBeenCalledWith(
         APPROVE.token,
@@ -811,8 +818,25 @@ describe('WalletAccountTron', () => {
         ],
         TronWeb.address.toHex(ACCOUNT.address)
       )
-      expect(sendRawTransactionMock).toHaveBeenCalledWith(
-        expect.objectContaining({ signature: expect.any(Array) })
+      expect(sendRawTransactionMock).toHaveBeenCalledWith({
+        ...TRANSACTION,
+        signature: [SIGNATURE]
+      })
+    })
+
+    test('should accept the amount as a number', async () => {
+      const { hash } = await account.approve({ ...APPROVE, amount: 100_000_000 })
+
+      expect(hash).toBe(DUMMY_TX_ID)
+      expect(triggerSmartContractMock).toHaveBeenCalledWith(
+        APPROVE.token,
+        'approve(address,uint256)',
+        { feeLimit: 15_000_000 },
+        [
+          { type: 'address', value: TronWeb.address.toHex(APPROVE.spender) },
+          { type: 'uint256', value: '100000000' }
+        ],
+        TronWeb.address.toHex(ACCOUNT.address)
       )
     })
 

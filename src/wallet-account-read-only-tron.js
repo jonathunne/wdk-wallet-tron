@@ -242,9 +242,7 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
     const result = await this._tronWeb.transactionBuilder
       .triggerConstantContract(tokenAddress, 'allowance(address,address)', {}, parameters, addressHex)
 
-    const allowance = this._tronWeb.toBigNumber('0x' + result.constant_result[0])
-
-    return BigInt(allowance)
+    return BigInt('0x' + result.constant_result[0])
   }
 
   /**

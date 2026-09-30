@@ -7,7 +7,7 @@
 
 **Note**: This package is currently in beta. Please test thoroughly in development environments before using in production.
 
-A simple and secure package to manage BIP-44 wallets for the TRON blockchain. This package provides a clean API for creating, managing, and interacting with TRON wallets using BIP-39 seed phrases and TRON-specific derivation paths.
+A TRON wallet module for WDK (Wallet Development Kit) by Tether. This package provides a clean API for creating, managing, and interacting with TRON wallets using BIP-39 seed phrases and TRON-specific derivation paths.
 
 ## About WDK
 

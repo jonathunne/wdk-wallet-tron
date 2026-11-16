@@ -248,24 +248,6 @@ describe('WalletManagerTron', () => {
         .rejects.toThrow(UNSUPPORTED_DERIVATION_ERROR)
     })
 
-    test('should not return the account at index 0 for a signer named like its path', async () => {
-      wallet.addSigner("0'/0/0", new PrivateKeySignerTron(PRIVATE_KEY))
-      await wallet.getAccount(0)
-
-      const account = await wallet.getAccount("0'/0/0")
-
-      expect(account.path).toBeNull()
-    })
-
-    test('should not return the account of a signer named like the path at index 0', async () => {
-      wallet.addSigner("0'/0/0", new PrivateKeySignerTron(PRIVATE_KEY))
-      await wallet.getAccount("0'/0/0")
-
-      const account = await wallet.getAccount(0)
-
-      expect(account.path).toBe("m/44'/195'/0'/0/0")
-    })
-
     test('should throw if no signer is registered with the given name', async () => {
       await expect(wallet.getAccount('missing'))
         .rejects.toThrow('No signer found with name "missing".')

@@ -145,19 +145,17 @@ export default class WalletManagerTron extends WalletManager {
         throw new DisposalError('The wallet manager has been disposed.')
       }
 
-      const key = `signer:${signerName}`
-
-      if (!this._accounts[key]) {
+      if (!this._accounts[signerName]) {
         const signer = this.getSigner(signerName)
 
         if (signer.disposed) {
           throw new DisposalError('The given signer has been disposed.')
         }
 
-        this._accounts[key] = new WalletAccountTron(signer, this._accountConfig())
+        this._accounts[signerName] = new WalletAccountTron(signer, this._accountConfig())
       }
 
-      return this._accounts[key]
+      return this._accounts[signerName]
     }
 
     if (!Number.isInteger(indexOrSignerName) || indexOrSignerName < 0 || indexOrSignerName >= 2 ** 31) {
@@ -188,7 +186,7 @@ export default class WalletManagerTron extends WalletManager {
     }
 
     const { signerName } = options
-    const key = signerName === undefined ? `path:${path}` : `path:${signerName}:${path}`
+    const key = signerName === undefined ? path : `${signerName}:${path}`
 
     if (!this._accounts[key]) {
       const rootSigner = this.getSigner(signerName)

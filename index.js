@@ -13,7 +13,7 @@
 // limitations under the License.
 'use strict'
 
-/** @typedef {import('tronweb').TransactionInfo} TronTransactionReceipt */
+/** @typedef {import('./src/wallet-account-read-only-tron.js').TronTransactionReceipt} TronTransactionReceipt */
 /** @typedef {import('./src/wallet-account-read-only-tron.js').TronTransactionDetails} TronTransactionDetails */
 
 /** @typedef {import('@tetherto/wdk-wallet').FeeRates} FeeRates */
@@ -36,10 +36,28 @@
 /** @typedef {import('./src/wallet-account-read-only-tron.js').EstimateEnergyCostValue} EstimateEnergyCostValue */
 /** @typedef {import('./src/wallet-account-read-only-tron.js').TronWalletConfig} TronWalletConfig */
 /** @typedef {import('./src/wallet-account-read-only-tron.js').TronActivationFee} TronActivationFee */
+/** @typedef {import('./src/wallet-account-read-only-tron.js').TronBandwidthCostOptions} TronBandwidthCostOptions */
 /** @typedef {import('./src/wallet-account-tron.js').TronSignedTransaction} TronSignedTransaction */
+/** @typedef {import('./src/wallet-account-tron.js').SignerOptions} SignerOptions */
+/** @typedef {import('./src/wallet-account-tron.js').ApproveOptions} ApproveOptions */
 
 export { default } from './src/wallet-manager-tron.js'
 
 export { default as WalletAccountReadOnlyTron } from './src/wallet-account-read-only-tron.js'
 
 export { default as WalletAccountTron } from './src/wallet-account-tron.js'
+
+export {
+  DisposalError,
+  InvalidSignerError,
+  MaximumFeeExceededError,
+  NoSuchElementError,
+  ProviderRequiredError,
+  TransferError,
+  TransferErrorReason,
+  UnsupportedOperationError,
+  ValueError,
+  WdkError
+} from '@tetherto/wdk-wallet'
+
+export { ISigner, IWalletAccount, IWalletAccountReadOnly } from '@tetherto/wdk-wallet'

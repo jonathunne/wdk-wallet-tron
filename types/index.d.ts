@@ -1,7 +1,7 @@
 export { default } from "./src/wallet-manager-tron.js";
 export { default as WalletAccountReadOnlyTron } from "./src/wallet-account-read-only-tron.js";
 export { default as WalletAccountTron } from "./src/wallet-account-tron.js";
-export type TronTransactionReceipt = import("tronweb").TransactionInfo;
+export type TronTransactionReceipt = import("./src/wallet-account-read-only-tron.js").TronTransactionReceipt;
 export type TronTransactionDetails = import("./src/wallet-account-read-only-tron.js").TronTransactionDetails;
 export type FeeRates = import("@tetherto/wdk-wallet").FeeRates;
 export type KeyPair = import("@tetherto/wdk-wallet").KeyPair;
@@ -21,4 +21,8 @@ export type TriggerSmartContractOptions = import("./src/wallet-account-read-only
 export type EstimateEnergyCostValue = import("./src/wallet-account-read-only-tron.js").EstimateEnergyCostValue;
 export type TronWalletConfig = import("./src/wallet-account-read-only-tron.js").TronWalletConfig;
 export type TronActivationFee = import("./src/wallet-account-read-only-tron.js").TronActivationFee;
+export type TronBandwidthCostOptions = import("./src/wallet-account-read-only-tron.js").TronBandwidthCostOptions;
 export type TronSignedTransaction = import("./src/wallet-account-tron.js").TronSignedTransaction;
+export type SignerOptions = import("./src/wallet-account-tron.js").SignerOptions;
+export type ApproveOptions = import("./src/wallet-account-tron.js").ApproveOptions;
+export { DisposalError, InvalidSignerError, MaximumFeeExceededError, NoSuchElementError, ProviderRequiredError, TransferError, TransferErrorReason, UnsupportedOperationError, ValueError, WdkError, ISigner, IWalletAccount, IWalletAccountReadOnly } from "@tetherto/wdk-wallet";

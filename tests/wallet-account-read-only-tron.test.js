@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 
 import { TronWeb, Trx } from 'tronweb'
-import { NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
+import { NoSuchElementError, ProviderRequiredError, TransferError, ValueError } from '@tetherto/wdk-wallet'
 
 const ADDRESS = 'TXngH8bVadn9ZWtKBgjKQcqN1GsZ7A1jcb'
 
@@ -108,7 +108,7 @@ describe('WalletAccountReadOnlyTron', () => {
     test('should throw if the account is not connected to tron web', async () => {
       const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
       await expect(disconnectedAccount.getBalance())
-        .rejects.toThrow('The wallet must be connected to tron web to retrieve balances.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to retrieve balances.'))
     })
   })
 
@@ -138,7 +138,7 @@ describe('WalletAccountReadOnlyTron', () => {
     test('should throw if the account is not connected to tron web', async () => {
       const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
       await expect(disconnectedAccount.getTokenBalance(TOKEN_ADDRESS))
-        .rejects.toThrow('The wallet must be connected to tron web to retrieve token balances.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to retrieve token balances.'))
     })
   })
 
@@ -172,7 +172,7 @@ describe('WalletAccountReadOnlyTron', () => {
     test('should throw if the account is not connected to tron web', async () => {
       const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
       await expect(disconnectedAccount.getAllowance(TOKEN_ADDRESS, SPENDER))
-        .rejects.toThrow('The wallet must be connected to tron web to retrieve allowances.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to retrieve allowances.'))
     })
   })
 
@@ -335,6 +335,9 @@ describe('WalletAccountReadOnlyTron', () => {
       )
       expect(fee).toBe(EXPECTED_FEE)
       expect(activationFee).toBe(0n)
+
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ADDRESS)
+      expect(getChainParametersMock).toHaveBeenCalledWith()
     })
 
     test('should quote a pre-built transaction (bandwidth only, no energy, no activation)', async () => {
@@ -363,12 +366,14 @@ describe('WalletAccountReadOnlyTron', () => {
       expect(getChainParametersMock).not.toHaveBeenCalled()
       expect(fee).toBe(EXPECTED_FEE)
       expect(activationFee).toBe(0n)
+
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ADDRESS)
     })
 
     test('should throw if the account is not connected to tron web', async () => {
       const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
       await expect(disconnectedAccount.quoteSendTransaction({ to: ADDRESS, value: 1000 }))
-        .rejects.toThrow('The wallet must be connected to tron web to quote transactions.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to quote transactions.'))
     })
   })
 
@@ -475,7 +480,7 @@ describe('WalletAccountReadOnlyTron', () => {
       expect(activationFee).toBe(undefined)
     })
 
-    test('should throw "Insufficient token balance" when simulation reverts and balance is below the transfer amount', async () => {
+    test('should throw an insufficient token balance transfer error when simulation reverts and balance is below the transfer amount', async () => {
       const TRANSFER = {
         token: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
         recipient: 'TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD',
@@ -490,7 +495,7 @@ describe('WalletAccountReadOnlyTron', () => {
       })
 
       await expect(account.quoteTransfer(TRANSFER))
-        .rejects.toThrow('Insufficient token balance for the transfer.')
+        .rejects.toThrow(expect.objectContaining({ constructor: TransferError, message: 'Insufficient token balance for the transfer.', reason: 'INSUFFICIENT_TOKEN_BALANCE' }))
 
       expect(triggerConstantContractMock).toHaveBeenNthCalledWith(
         1,
@@ -559,7 +564,7 @@ describe('WalletAccountReadOnlyTron', () => {
         recipient: ADDRESS,
         amount: 100
       }))
-        .rejects.toThrow('The wallet must be connected to tron web to quote transfer operations.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to quote transfer operations.'))
     })
   })
 
@@ -594,7 +599,7 @@ describe('WalletAccountReadOnlyTron', () => {
     test('should throw if the account is not connected to tron web', async () => {
       const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
       await expect(disconnectedAccount.getTransactionReceipt(TRANSACTION_HASH))
-        .rejects.toThrow('The wallet must be connected to tron web to fetch transaction receipts.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to fetch transaction receipts.'))
     })
   })
 
@@ -602,14 +607,16 @@ describe('WalletAccountReadOnlyTron', () => {
     const TRANSACTION_HASH = 'c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2'
 
     test('should throw ValueError when the transaction id is malformed', async () => {
-      await expect(account.getTransaction('not-a-valid-txid')).rejects.toThrow(ValueError)
+      await expect(account.getTransaction('not-a-valid-txid'))
+        .rejects.toThrow(expect.objectContaining({ constructor: ValueError, message: "Invalid transaction id: 'not-a-valid-txid'." }))
       expect(getUnconfirmedTransactionInfoMock).not.toHaveBeenCalled()
     })
 
     test('should throw NoSuchElementError when the transaction is not known', async () => {
       getUnconfirmedTransactionInfoMock.mockResolvedValue({})
 
-      await expect(account.getTransaction(TRANSACTION_HASH)).rejects.toThrow(NoSuchElementError)
+      await expect(account.getTransaction(TRANSACTION_HASH))
+        .rejects.toThrow(expect.objectContaining({ constructor: NoSuchElementError, message: `No transaction found for '${TRANSACTION_HASH}'.` }))
       expect(getUnconfirmedTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
       expect(getConfirmedCurrentBlockMock).not.toHaveBeenCalled()
     })
@@ -622,38 +629,43 @@ describe('WalletAccountReadOnlyTron', () => {
 
       const info = await account.getTransaction(TRANSACTION_HASH)
 
-      expect(info).toMatchObject({
+      expect(info).toStrictEqual({
         hash: TRANSACTION_HASH,
         finality: 'pending',
         confirmations: null,
         receipt: null
       })
-      expect(info.success).toBeUndefined()
       expect(getConfirmedCurrentBlockMock).not.toHaveBeenCalled()
+
+      expect(getUnconfirmedTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
     })
 
     test('should report confirmed while the block is not yet solidified', async () => {
-      getUnconfirmedTransactionInfoMock.mockResolvedValue({
+      const DUMMY_TRANSACTION_INFO = {
         id: TRANSACTION_HASH,
         blockNumber: 12345,
         fee: 1000,
         receipt: { result: 'SUCCESS' }
-      })
+      }
+      getUnconfirmedTransactionInfoMock.mockResolvedValue(DUMMY_TRANSACTION_INFO)
       getConfirmedCurrentBlockMock.mockResolvedValue({
         block_header: { raw_data: { number: 12340 } }
       })
 
       const info = await account.getTransaction(TRANSACTION_HASH)
 
-      expect(info).toMatchObject({
+      expect(info).toStrictEqual({
         hash: TRANSACTION_HASH,
         finality: 'confirmed',
         success: true,
         block: 12345,
         fee: 1000n,
-        confirmations: 0
+        confirmations: 0,
+        receipt: DUMMY_TRANSACTION_INFO
       })
-      expect(info.receipt).not.toBeNull()
+
+      expect(getUnconfirmedTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
+      expect(getConfirmedCurrentBlockMock).toHaveBeenCalledWith()
     })
 
     test('should report final once the block is solidified', async () => {
@@ -671,6 +683,9 @@ describe('WalletAccountReadOnlyTron', () => {
 
       expect(info.finality).toBe('final')
       expect(info.confirmations).toBe(6)
+
+      expect(getUnconfirmedTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
+      expect(getConfirmedCurrentBlockMock).toHaveBeenCalledWith()
     })
 
     test('should report success for a plain trx transfer without a receipt result', async () => {
@@ -686,6 +701,9 @@ describe('WalletAccountReadOnlyTron', () => {
       const info = await account.getTransaction(TRANSACTION_HASH)
 
       expect(info.success).toBe(true)
+
+      expect(getUnconfirmedTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
+      expect(getConfirmedCurrentBlockMock).toHaveBeenCalledWith()
     })
 
     test('should report failure for a reverted contract call', async () => {
@@ -704,6 +722,9 @@ describe('WalletAccountReadOnlyTron', () => {
 
       expect(info.finality).toBe('final')
       expect(info.success).toBe(false)
+
+      expect(getUnconfirmedTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
+      expect(getConfirmedCurrentBlockMock).toHaveBeenCalledWith()
     })
 
     test('should fall back to null confirmations when the solidified block is unavailable', async () => {
@@ -719,12 +740,15 @@ describe('WalletAccountReadOnlyTron', () => {
 
       expect(info.finality).toBe('confirmed')
       expect(info.confirmations).toBeNull()
+
+      expect(getUnconfirmedTransactionInfoMock).toHaveBeenCalledWith(TRANSACTION_HASH)
+      expect(getConfirmedCurrentBlockMock).toHaveBeenCalledWith()
     })
 
     test('should throw if the account is not connected to tron web', async () => {
       const disconnectedAccount = new WalletAccountReadOnlyTron(ADDRESS)
       await expect(disconnectedAccount.getTransaction(TRANSACTION_HASH))
-        .rejects.toThrow('The wallet must be connected to tron web to fetch transactions.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to fetch transactions.'))
     })
   })
 })

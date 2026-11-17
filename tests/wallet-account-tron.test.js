@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
+
+import { MaximumFeeExceededError, ProviderRequiredError } from '@tetherto/wdk-wallet'
 import * as bip39 from 'bip39'
 
 import { TronWeb, Trx } from 'tronweb'
@@ -8,7 +10,6 @@ const INVALID_SEED_PHRASE = 'invalid seed phrase'
 const SEED = bip39.mnemonicToSeedSync(SEED_PHRASE)
 
 const ACCOUNT = {
-  index: 0,
   path: "m/44'/195'/0'/0/0",
   address: 'TXngH8bVadn9ZWtKBgjKQcqN1GsZ7A1jcb',
   keyPair: {
@@ -16,6 +17,9 @@ const ACCOUNT = {
     publicKey: '03ebdf0c06e1523a5931e7593e3ac231f5a123b898eb6c02af61aa83b32f8603b0'
   }
 }
+
+const MESSAGE = 'Dummy message to sign.'
+const MESSAGE_SIGNATURE = '0x67b1e4bb9a9b070cd60776ceab1ff4d7c4d4997bb5b4a71757da646f75d847e6600c22d8d83caa13d42c33099f75ba5ec30390467392aa78a3e5319da6c30e291b'
 
 const sendRawTransactionMock = jest.fn()
 const getAccountMock = jest.fn()
@@ -57,7 +61,8 @@ jest.unstable_mockModule('tronweb', () => {
   }
 })
 
-const { WalletAccountTron, WalletAccountReadOnlyTron } = await import('../index.js')
+const { WalletAccountTron, WalletAccountReadOnlyTron, DisposalError, ValueError } = await import('../index.js')
+const { SeedSignerTron } = await import('../src/signers/index.js')
 
 const BUILT_RAW_DATA = {
   contract: [{
@@ -93,7 +98,6 @@ describe('WalletAccountTron', () => {
 
   describe('constructor', () => {
     test('should successfully initialize an account for the given seed phrase and path', () => {
-      expect(account.index).toBe(ACCOUNT.index)
       expect(account.path).toBe(ACCOUNT.path)
       expect(account.keyPair).toEqual({
         privateKey: new Uint8Array(Buffer.from(ACCOUNT.keyPair.privateKey, 'hex')),
@@ -104,7 +108,6 @@ describe('WalletAccountTron', () => {
     test('should successfully initialize an account for the given seed and path', () => {
       const account = new WalletAccountTron(SEED, "0'/0/0", { provider: 'https://tron.web.provider/' })
 
-      expect(account.index).toBe(ACCOUNT.index)
       expect(account.path).toBe(ACCOUNT.path)
       expect(account.keyPair).toEqual({
         privateKey: new Uint8Array(Buffer.from(ACCOUNT.keyPair.privateKey, 'hex')),
@@ -119,17 +122,188 @@ describe('WalletAccountTron', () => {
 
     test('should throw if the path is invalid', () => {
       expect(() => { new WalletAccountTron(SEED_PHRASE, "a'/b/c") })
-        .toThrow('invalid child index')
+        .toThrow(expect.objectContaining({ constructor: ValueError, message: 'The derivation path is not a valid BIP-32 path.' }))
+    })
+
+    test('should default to the first account if only a seed and a config are given', async () => {
+      const account = new WalletAccountTron(SEED_PHRASE, { provider: 'https://tron.web.provider/' })
+
+      expect(account.path).toBe(ACCOUNT.path)
+      expect(await account.getAddress()).toBe(ACCOUNT.address)
+    })
+
+    test('should keep the config if only a seed and a config are given', () => {
+      const config = { provider: 'https://tron.web.provider/' }
+
+      const account = new WalletAccountTron(SEED_PHRASE, config)
+
+      expect(account.config).toBe(config)
+    })
+
+    test('should default to the first account if only a seed is given', async () => {
+      const account = new WalletAccountTron(SEED)
+
+      expect(account.path).toBe(ACCOUNT.path)
+      expect(await account.getAddress()).toBe(ACCOUNT.address)
+    })
+
+    describe('signer', () => {
+      test('should successfully initialize an account for the given signer', async () => {
+        const signer = new SeedSignerTron(SEED_PHRASE, ACCOUNT.path)
+        const account = new WalletAccountTron(signer, { provider: 'https://tron.web.provider/' })
+
+        expect(account.path).toBe(ACCOUNT.path)
+        expect(await account.getAddress()).toBe(ACCOUNT.address)
+        expect(account.keyPair).toEqual({
+          privateKey: new Uint8Array(Buffer.from(ACCOUNT.keyPair.privateKey, 'hex')),
+          publicKey: new Uint8Array(Buffer.from(ACCOUNT.keyPair.publicKey, 'hex'))
+        })
+      })
+
+      test('should initialize without a config', async () => {
+        const account = new WalletAccountTron(new SeedSignerTron(SEED_PHRASE, ACCOUNT.path))
+
+        expect(await account.getAddress()).toBe(ACCOUNT.address)
+      })
+    })
+  })
+
+  describe('fromPrivateKey', () => {
+    test('should create an account from a hex private key', async () => {
+      const account = WalletAccountTron.fromPrivateKey(ACCOUNT.keyPair.privateKey, { provider: 'https://tron.web.provider/' })
+
+      expect(account.path).toBeNull()
+      expect(await account.getAddress()).toBe(ACCOUNT.address)
+      expect(account.keyPair).toEqual({
+        privateKey: new Uint8Array(Buffer.from(ACCOUNT.keyPair.privateKey, 'hex')),
+        publicKey: new Uint8Array(Buffer.from(ACCOUNT.keyPair.publicKey, 'hex'))
+      })
+    })
+
+    test('should accept a 0x-prefixed private key', () => {
+      const account = WalletAccountTron.fromPrivateKey('0x' + ACCOUNT.keyPair.privateKey)
+
+      expect(account.keyPair).toEqual({
+        privateKey: new Uint8Array(Buffer.from(ACCOUNT.keyPair.privateKey, 'hex')),
+        publicKey: new Uint8Array(Buffer.from(ACCOUNT.keyPair.publicKey, 'hex'))
+      })
+    })
+
+    test('should wipe the signer it created on dispose', () => {
+      const account = WalletAccountTron.fromPrivateKey(ACCOUNT.keyPair.privateKey)
+
+      account.dispose()
+
+      expect(account.keyPair.privateKey).toBeNull()
+    })
+  })
+
+  describe('disposed', () => {
+    test('should be false after construction and true after dispose', () => {
+      const account = new WalletAccountTron(SEED_PHRASE, "0'/0/0")
+
+      expect(account.disposed).toBe(false)
+
+      account.dispose()
+
+      expect(account.disposed).toBe(true)
+    })
+
+    test.each([
+      ['sign', (account) => account.sign('Dummy message to sign.')],
+      ['signTransaction', (account) => account.signTransaction({ to: RECIPIENT, value: 1 })],
+      ['sendTransaction', (account) => account.sendTransaction({ to: RECIPIENT, value: 1 })],
+      ['transfer', (account) => account.transfer({ token: RECIPIENT, recipient: RECIPIENT, amount: 1 })],
+      ['approve', (account) => account.approve({ token: RECIPIENT, spender: RECIPIENT, amount: 1 })]
+    ])('should throw from %s once disposed', async (_, call) => {
+      const account = new WalletAccountTron(SEED_PHRASE, "0'/0/0", { provider: 'https://tron.web.provider/' })
+
+      account.dispose()
+
+      await expect(call(account)).rejects.toThrow(expect.objectContaining({ constructor: DisposalError, message: 'The wallet account has been disposed.' }))
+    })
+
+    test('should throw a disposal error from approve before checking the provider', async () => {
+      const account = new WalletAccountTron(SEED_PHRASE, "0'/0/0")
+
+      account.dispose()
+
+      await expect(account.approve({ token: RECIPIENT, spender: RECIPIENT, amount: 1 }))
+        .rejects.toThrow(expect.objectContaining({ constructor: DisposalError, message: 'The wallet account has been disposed.' }))
+    })
+
+    test('should still return the address once disposed', async () => {
+      const account = new WalletAccountTron(SEED_PHRASE, "0'/0/0")
+
+      account.dispose()
+
+      expect(await account.getAddress()).toBe(ACCOUNT.address)
+    })
+  })
+
+  describe('signer ownership', () => {
+    test('should wipe the signer it built from a seed', () => {
+      const account = new WalletAccountTron(SEED_PHRASE, "0'/0/0")
+      const { privateKey } = account.keyPair
+
+      account.dispose()
+
+      expect(account.keyPair.privateKey).toBeNull()
+      expect(privateKey).toEqual(new Uint8Array(32))
+    })
+
+    test('should wipe the signer it built from a raw seed', () => {
+      const account = new WalletAccountTron(Uint8Array.from(SEED), "0'/0/0")
+      const { privateKey } = account.keyPair
+
+      account.dispose()
+
+      expect(privateKey).toEqual(new Uint8Array(32))
+    })
+
+    test('should not wipe a signer supplied by the caller', () => {
+      const signer = new SeedSignerTron(SEED_PHRASE, ACCOUNT.path)
+      const account = new WalletAccountTron(signer)
+
+      account.dispose()
+
+      expect(signer.disposed).toBe(false)
+    })
+
+    test('should still expose the public key of a supplied signer once disposed', () => {
+      const signer = new SeedSignerTron(SEED_PHRASE, ACCOUNT.path)
+      const account = new WalletAccountTron(signer)
+
+      account.dispose()
+
+      expect(account.keyPair.publicKey).toEqual(signer.keyPair.publicKey)
+    })
+
+    test('should dispose an owned signer only once when disposed twice', () => {
+      const signer = new SeedSignerTron(SEED_PHRASE, ACCOUNT.path)
+      const disposeSpy = jest.spyOn(signer, 'dispose')
+      const account = new WalletAccountTron(signer, { shouldWipeSignerOnDisposal: true })
+      account.dispose()
+
+      account.dispose()
+
+      expect(disposeSpy).toHaveBeenCalledTimes(1)
+    })
+
+    test('should wipe a supplied signer if the account is told to own it', () => {
+      const signer = new SeedSignerTron(SEED_PHRASE, ACCOUNT.path)
+      const account = new WalletAccountTron(signer, { shouldWipeSignerOnDisposal: true })
+
+      account.dispose()
+
+      expect(signer.disposed).toBe(true)
     })
   })
 
   describe('sign', () => {
-    const MESSAGE = 'Dummy message to sign.'
-    const EXPECTED_SIGNATURE = '0x67b1e4bb9a9b070cd60776ceab1ff4d7c4d4997bb5b4a71757da646f75d847e6600c22d8d83caa13d42c33099f75ba5ec30390467392aa78a3e5319da6c30e291b'
-
     test('should return the correct signature', async () => {
       const signature = await account.sign(MESSAGE)
-      expect(signature).toBe(EXPECTED_SIGNATURE)
+      expect(signature).toBe(MESSAGE_SIGNATURE)
     })
   })
 
@@ -196,6 +370,13 @@ describe('WalletAccountTron', () => {
   }
 
   describe('signTransaction', () => {
+    test('should throw if the account is not connected to tron web', async () => {
+      const disconnected = new WalletAccountTron(SEED_PHRASE, "0'/0/0")
+
+      await expect(disconnected.signTransaction({ to: 'TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD', value: 1_000_000 }))
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to sign transactions.'))
+    })
+
     test('should throw if transaction fee exceeds the transaction max fee configuration', async () => {
       const TRANSACTION = {
         to: 'TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD',
@@ -224,7 +405,11 @@ describe('WalletAccountTron', () => {
       })
 
       await expect(accountWithMaxFee.signTransaction(TRANSACTION))
-        .rejects.toThrow('Exceeded maximum fee cost for transaction operation.')
+        .rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for transaction operation.'))
+
+      expect(sendTrxMock).toHaveBeenCalledWith(TRANSACTION.to, TRANSACTION.value, ACCOUNT.address)
+      expect(getAccountMock).toHaveBeenCalledWith(TronWeb.address.toHex(TRANSACTION.to))
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
 
     test('should allow a fee exactly equal to transactionMaxFee', async () => {
@@ -261,6 +446,10 @@ describe('WalletAccountTron', () => {
         ...DUMMY_SEND_TRX_RESULT,
         signature: [EXPECTED_SIGNATURE]
       })
+
+      expect(sendTrxMock).toHaveBeenCalledWith(TRANSACTION.to, TRANSACTION.value, ACCOUNT.address)
+      expect(getAccountMock).toHaveBeenCalledWith(TronWeb.address.toHex(TRANSACTION.to))
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
 
     test('should allow a fee below transactionMaxFee', async () => {
@@ -297,6 +486,10 @@ describe('WalletAccountTron', () => {
         ...DUMMY_SEND_TRX_RESULT,
         signature: [EXPECTED_SIGNATURE]
       })
+
+      expect(sendTrxMock).toHaveBeenCalledWith(TRANSACTION.to, TRANSACTION.value, ACCOUNT.address)
+      expect(getAccountMock).toHaveBeenCalledWith(TronWeb.address.toHex(TRANSACTION.to))
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
 
     test('should sign a tronix transfer and return the signed tx', async () => {
@@ -312,6 +505,8 @@ describe('WalletAccountTron', () => {
         ...DUMMY_SEND_TRX_RESULT,
         signature: [EXPECTED_SIGNATURE]
       })
+
+      expect(sendTrxMock).toHaveBeenCalledWith(TRANSACTION.to, TRANSACTION.value, ACCOUNT.address)
     })
 
     test('should sign a consistent prebuilt transaction owned by the account', async () => {
@@ -393,6 +588,8 @@ describe('WalletAccountTron', () => {
 
       expect(fee).toBe(245_000n)
       expect(activationFee).toBe(0n)
+
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
   })
 
@@ -449,28 +646,28 @@ describe('WalletAccountTron', () => {
         options: { feeLimit: 15_000_000 }
       }
       const DUMMY_TX_ID = 'contractcall123'
+      const DUMMY_TRANSACTION = {
+        txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
+        raw_data: {
+          contract: [{
+            type: 'TriggerSmartContract',
+            parameter: {
+              value: {
+                contract_address: TronWeb.address.toHex(CONTRACT),
+                owner_address: TronWeb.address.toHex(ACCOUNT.address),
+                data: 'deadbeef',
+                call_value: 0
+              }
+            }
+          }]
+        },
+        raw_data_hex: '0a' + '00'.repeat(200)
+      }
+      const SIGNATURE = 'b4273d17c4b46fb47d59b5aca2b4134cd83e02394a28bc4e86ffda7cbe1a21762b96e3af3d273d7e874153100fb2f1510f7e6579fa5ea9dde9107d4d15e1541100'
       // energy_used (10000) * energy price (420) = 4,200,000 SUN; bandwidth covered by the free limit
       const EXPECTED_FEE = 4_200_000n
 
-      triggerSmartContractMock.mockResolvedValue({
-        transaction: {
-          txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
-          raw_data: {
-            contract: [{
-              type: 'TriggerSmartContract',
-              parameter: {
-                value: {
-                  contract_address: TronWeb.address.toHex(CONTRACT),
-                  owner_address: TronWeb.address.toHex(ACCOUNT.address),
-                  data: 'deadbeef',
-                  call_value: 0
-                }
-              }
-            }]
-          },
-          raw_data_hex: '0a' + '00'.repeat(200)
-        }
-      })
+      triggerSmartContractMock.mockResolvedValue({ transaction: DUMMY_TRANSACTION })
 
       triggerConstantContractMock.mockResolvedValue({ energy_used: 10000 })
       sendRawTransactionMock.mockResolvedValue({ txid: DUMMY_TX_ID })
@@ -497,9 +694,11 @@ describe('WalletAccountTron', () => {
         CALL.parameters,
         TronWeb.address.toHex(ACCOUNT.address)
       )
-      expect(sendRawTransactionMock).toHaveBeenCalledWith(
-        expect.objectContaining({ signature: expect.any(Array) })
-      )
+      expect(sendRawTransactionMock).toHaveBeenCalledWith({ ...DUMMY_TRANSACTION, signature: [SIGNATURE] })
+
+      expect(triggerConstantContractMock).toHaveBeenCalledWith(TronWeb.address.toHex(CONTRACT), '', { input: 'deadbeef', callValue: 0 }, [], TronWeb.address.toHex(ACCOUNT.address))
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
+      expect(getChainParametersMock).toHaveBeenCalledWith()
     })
 
     test('should successfully send a pre-built transaction', async () => {
@@ -520,6 +719,7 @@ describe('WalletAccountTron', () => {
         },
         raw_data_hex: '0A021234220800112233445566774080D095FFBC315A5A083612560A34747970652E676F6F676C65617069732E636F6D2F70726F746F636F6C2E467265657A6542616C616E63655632436F6E7472616374121E0A1541EF54F621D390F3491946659C31DDB8EF6785DD471080ADE204180170C0CBD8FEBC31'
       }
+      const SIGNATURE = '35e63169bc6ac6ea82e1df9d1f70e1f90c820a01ce1ff14dce0a28efb66522aa1851011b8a2ce0488e50d0524c2d128b014ab55580d5ba5a238d9a65d6e5479700'
       const EXPECTED_FEE = 264_000n
 
       sendRawTransactionMock.mockResolvedValue({ txid: 'freeze123' })
@@ -531,9 +731,9 @@ describe('WalletAccountTron', () => {
       expect(fee).toBe(EXPECTED_FEE)
       expect(activationFee).toBe(0n)
       expect(triggerConstantContractMock).not.toHaveBeenCalled()
-      expect(sendRawTransactionMock).toHaveBeenCalledWith(
-        expect.objectContaining({ signature: expect.any(Array) })
-      )
+      expect(sendRawTransactionMock).toHaveBeenCalledWith({ ...PREBUILT, signature: [SIGNATURE] })
+
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
 
     test('should throw if the transaction owner does not match the account', async () => {
@@ -574,8 +774,6 @@ describe('WalletAccountTron', () => {
 
       sendRawTransactionMock.mockResolvedValue({ txid: DUMMY_TX_ID })
 
-      getAccountMock.mockResolvedValue({ address: RECIPIENT })
-
       getAccountResourcesMock.mockResolvedValue({
         freeNetLimit: 5000,
         freeNetUsed: 0,
@@ -591,6 +789,8 @@ describe('WalletAccountTron', () => {
 
       expect(sendRawTransactionMock).toHaveBeenCalledWith(SIGNED_TX)
       expect(sendTrxMock).not.toHaveBeenCalled()
+
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
 
     test('should throw if transaction fee exceeds the transaction max fee configuration', async () => {
@@ -621,7 +821,11 @@ describe('WalletAccountTron', () => {
       })
 
       await expect(accountWithMaxFee.sendTransaction(TRANSACTION))
-        .rejects.toThrow('Exceeded maximum fee cost for transaction operation.')
+        .rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for transaction operation.'))
+
+      expect(sendTrxMock).toHaveBeenCalledWith(TRANSACTION.to, TRANSACTION.value, ACCOUNT.address)
+      expect(getAccountMock).toHaveBeenCalledWith(TronWeb.address.toHex(TRANSACTION.to))
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
     })
 
     test('should allow a fee exactly equal to transactionMaxFee', async () => {
@@ -653,10 +857,16 @@ describe('WalletAccountTron', () => {
         transactionMaxFee: 245_000n
       })
 
-      const { hash, fee } = await accountWithMaxFee.sendTransaction(TRANSACTION)
+      const { hash, fee, activationFee } = await accountWithMaxFee.sendTransaction(TRANSACTION)
 
       expect(hash).toBe(DUMMY_TX_ID)
       expect(fee).toBe(245_000n)
+      expect(activationFee).toBe(0n)
+
+      expect(sendTrxMock).toHaveBeenCalledWith(TRANSACTION.to, TRANSACTION.value, ACCOUNT.address)
+      expect(getAccountMock).toHaveBeenCalledWith(TronWeb.address.toHex(TRANSACTION.to))
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
+      expect(sendRawTransactionMock).toHaveBeenCalledWith({ ...DUMMY_SEND_TRX_RESULT, signature: ['e2fbd0590d2a6150952afdcdb8c0b137a8828fe45dacc6f17f552b10234baa9231811488104983c4d4333ad51c90343801aa72e41b1d576719cc798c4c98546100'] })
     })
 
     test('should allow a fee below transactionMaxFee', async () => {
@@ -688,16 +898,22 @@ describe('WalletAccountTron', () => {
         transactionMaxFee: 300_000n
       })
 
-      const { hash, fee } = await accountWithMaxFee.sendTransaction(TRANSACTION)
+      const { hash, fee, activationFee } = await accountWithMaxFee.sendTransaction(TRANSACTION)
 
       expect(hash).toBe(DUMMY_TX_ID)
       expect(fee).toBe(245_000n)
+      expect(activationFee).toBe(0n)
+
+      expect(sendTrxMock).toHaveBeenCalledWith(TRANSACTION.to, TRANSACTION.value, ACCOUNT.address)
+      expect(getAccountMock).toHaveBeenCalledWith(TronWeb.address.toHex(TRANSACTION.to))
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
+      expect(sendRawTransactionMock).toHaveBeenCalledWith({ ...DUMMY_SEND_TRX_RESULT, signature: ['e2fbd0590d2a6150952afdcdb8c0b137a8828fe45dacc6f17f552b10234baa9231811488104983c4d4333ad51c90343801aa72e41b1d576719cc798c4c98546100'] })
     })
 
     test('should throw if the account is not connected to tron web', async () => {
       const disconnected = new WalletAccountTron(SEED_PHRASE, "0'/0/0")
       await expect(disconnected.sendTransaction({ to: RECIPIENT, value: 1000 }))
-        .rejects.toThrow('The wallet must be connected to tron web to send transactions.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to send transactions.'))
     })
   })
 
@@ -791,8 +1007,6 @@ describe('WalletAccountTron', () => {
         transaction: { raw_data_hex: '0a' + '00'.repeat(200) }
       })
 
-      getAccountMock.mockResolvedValue({ address: 'TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD' })
-
       getAccountResourcesMock.mockResolvedValue({
         freeNetLimit: 0,
         freeNetUsed: 0,
@@ -815,7 +1029,20 @@ describe('WalletAccountTron', () => {
         token: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
         recipient: 'TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD',
         amount: 100_000_000
-      })).rejects.toThrow('Exceeded maximum fee cost for transfer operations.')
+      })).rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for transfer operations.'))
+
+      expect(triggerConstantContractMock).toHaveBeenCalledWith(
+        'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        'transfer(address,uint256)',
+        {},
+        [
+          { type: 'address', value: TronWeb.address.toHex('TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD') },
+          { type: 'uint256', value: 100_000_000 }
+        ],
+        TronWeb.address.toHex(ACCOUNT.address)
+      )
+      expect(getAccountResourcesMock).toHaveBeenCalledWith(ACCOUNT.address)
+      expect(getChainParametersMock).toHaveBeenCalledWith()
     })
 
     test('should throw if the account is not connected to tron web', async () => {
@@ -824,7 +1051,7 @@ describe('WalletAccountTron', () => {
         token: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
         recipient: 'TAibbFBAkcNioexXTFWKbp65mgLp7JiqHD',
         amount: 100
-      })).rejects.toThrow('The wallet must be connected to tron web to transfer tokens.')
+      })).rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to transfer tokens.'))
     })
   })
 
@@ -837,7 +1064,7 @@ describe('WalletAccountTron', () => {
 
     const DUMMY_TX_ID = 'approvecall123'
 
-    const TRANSACTION = {
+    const DUMMY_TRANSACTION = {
       txID: '12a406f767b30e00b317758aa25fcddc0ff8a329b7cad741dd204676d0e6c5ce',
       raw_data: {
         contract: [{
@@ -855,11 +1082,11 @@ describe('WalletAccountTron', () => {
       raw_data_hex: '0a' + '00'.repeat(200)
     }
 
-    // The signature of TRANSACTION.txID by the test account's private key.
+    // The signature of DUMMY_TRANSACTION.txID by the test account's private key.
     const SIGNATURE = 'b4273d17c4b46fb47d59b5aca2b4134cd83e02394a28bc4e86ffda7cbe1a21762b96e3af3d273d7e874153100fb2f1510f7e6579fa5ea9dde9107d4d15e1541100'
 
     beforeEach(() => {
-      triggerSmartContractMock.mockResolvedValue({ transaction: TRANSACTION })
+      triggerSmartContractMock.mockResolvedValue({ transaction: DUMMY_TRANSACTION })
       triggerConstantContractMock.mockResolvedValue({ energy_used: 10000 })
       sendRawTransactionMock.mockResolvedValue({ txid: DUMMY_TX_ID })
       getAccountResourcesMock.mockResolvedValue({
@@ -892,15 +1119,17 @@ describe('WalletAccountTron', () => {
         TronWeb.address.toHex(ACCOUNT.address)
       )
       expect(sendRawTransactionMock).toHaveBeenCalledWith({
-        ...TRANSACTION,
+        ...DUMMY_TRANSACTION,
         signature: [SIGNATURE]
       })
     })
 
     test('should accept the amount as a number', async () => {
-      const { hash } = await account.approve({ ...APPROVE, amount: 100_000_000 })
+      const { hash, fee, activationFee } = await account.approve({ ...APPROVE, amount: 100_000_000 })
 
       expect(hash).toBe(DUMMY_TX_ID)
+      expect(fee).toBe(4_200_000n)
+      expect(activationFee).toBe(0n)
       expect(triggerSmartContractMock).toHaveBeenCalledWith(
         APPROVE.token,
         'approve(address,uint256)',
@@ -916,14 +1145,13 @@ describe('WalletAccountTron', () => {
     test('should throw if the account is not connected to tron web', async () => {
       const disconnected = new WalletAccountTron(SEED_PHRASE, "0'/0/0")
       await expect(disconnected.approve(APPROVE))
-        .rejects.toThrow('The wallet must be connected to tron web to approve funds.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to tron web to approve funds.'))
     })
   })
 
   describe('toReadOnlyAccount', () => {
     test('should return a read-only copy of the account', async () => {
       const readOnlyAccount = await account.toReadOnlyAccount()
-      expect(readOnlyAccount).toBeInstanceOf(WalletAccountReadOnlyTron)
 
       const readOnlyAddress = await readOnlyAccount.getAddress()
       expect(readOnlyAddress).toBe(ACCOUNT.address)

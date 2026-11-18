@@ -122,7 +122,7 @@ export default class WalletAccountReadOnlyTron extends WalletAccountReadOnly {
    * @param {Omit<TronWalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} [config] - The configuration object.
    */
   constructor (address, config = {}) {
-    super(address)
+    super(address, config)
 
     /**
      * The read-only wallet account configuration.
